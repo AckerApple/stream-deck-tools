@@ -1,0 +1,11 @@
+<div class="text-center">
+  <!--(directoryManagerChange)="session.save();session.streamDeck=$event;setDirectory($event)"-->
+  <!--(error)="session.error('could not load StreamDeck path', $event)"-->
+  <!-- [reloadPath]="session.config.launchBox.path"-->
+  <robust-select-directory label="StreamDeck"
+    [(directoryManager)]="streamDeckDir"
+    (directoryManagerChange)="setDirectory($event)"
+  ></robust-select-directory>
+</div>
+
+🍎: ~/Library/Application Support/com.elgato.StreamDeck/
