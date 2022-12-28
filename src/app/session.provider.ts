@@ -1,20 +1,18 @@
 import { EventEmitter, Injectable } from "@angular/core"
+import { DirectoryManager } from "ack-angular-components/directory-managers/DirectoryManagers"
 import { getOs, getStorage, saveStorage } from "./app.utilities"
+import { StreamDeck } from "./StreamDeck.class"
 
 @Injectable()
 export class SessionProvider {
   lastError?: Record<string, any>
   os = getOs()
+  loading = 0
 
+  streamdeck = new StreamDeck(this)
+
+  // default localStorage
   config = {
-    xarcadeXinput: {
-      path: this.os === 'Darwin' ? '' : (this.os ? 'C:\\Users\\Administrator\\LaunchBox\\Tools\\xarcade-xinput' : ''),
-    },
-    launchBox: {
-      path: this.os === 'Darwin' ? '' : (this.os ? 'C:\\Users\\Administrator\\LaunchBox\\' : ''),
-      dataFolderName: 'Data',
-      bigBoxFileName: 'BigBoxSettings.xml'
-    },
   }
 
   constructor() {
@@ -34,9 +32,10 @@ export class SessionProvider {
     }
   }
 
-  error(message: string, err?: any) {
-    this.lastError = Object.getOwnPropertyNames(err).reduce((a, key) => (a[key] = err[key]) && a || a, {} as any)
+  error<Err>(message: string, err?: Err): Err {
+    this.lastError = Object.getOwnPropertyNames(err).reduce((a, key) => (a[key] = (err as any)[key]) && a || a, {} as any)
     console.error('🔴 ' + message, err)
+    return err as Err
   }
 
   save() {

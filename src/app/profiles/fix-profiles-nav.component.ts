@@ -1,41 +1,12 @@
 import { Component } from '@angular/core'
 import { DirectoryManager, DmFileReader } from 'ack-angular-components/directory-managers/DirectoryManagers'
-
-interface DeviceProfile {
-  Device: Device
-  Name: string
-  Pages: {
-    Current: string
-    Pages: string[]
-  },
-  Version: string
-}
-
-
-interface Profile {
-  Controllers: {
-    Actions: {
-      [position: string]: ProfileAction
-    }
-  }[]
-}
-
-interface ProfileAction {
-  Name: string
-  Settings: {
-    ProfileUUID: string
-  }
-  States: { Image: string }[]
-}
-
-interface Device {
-  Model:string
-  UUID:string
-}
+import { Actions, Device, DeviceProfile, ProfileAction, ProfileFolderManifest, State } from '../elgato.types'
+import { SessionProvider } from '../session.provider'
+import { manifestFolderOnly } from '../StreamDeck.class'
 
 interface BadAction {
   fixProfile: string // where is should point to
-  profile: Profile
+  profile: ProfileFolderManifest
   file: DmFileReader // The file with the bad switch
   device: Device // The device with the bad switch
   action: ProfileAction // The bad instructions
@@ -49,30 +20,37 @@ interface BadAction {
   templateUrl: './fix-profiles-nav.component.html',
 })
 export class FixProfilesNavComponent {
-  streamDeckDir?: DirectoryManager
+  badActions: BadAction[] = []
+  searched = false
 
-  async setDirectory(dir: DirectoryManager) {
-    const profilesV2 = await dir.getDirectory('ProfilesV2')
-    
-    // get profiles folders
-    const folders = await profilesV2.getFolders()
-    const targetFolders = await Promise.all( folders.map(manifestFolderOnly) )
-    const dirs = targetFolders.filter(folder => folder) as DirectoryManager[]
-    
-    // loop profile folders
-    const inspectedFolders = dirs.map(profileFolder => this.inspectProfileFolders(profileFolder, profilesV2))
-    const badActions = (await Promise.all(inspectedFolders))
-      .reduce((all, now) => {
-        all.push(...now)
-        return all
-      },[])
+  constructor(public session: SessionProvider) {}
 
-    console.log('badActions', badActions)
-    await Promise.all( this.fixBadActions(badActions) )
-    console.log('fixedActions', badActions)
+  async load() {
+    ++this.session.loading
+    
+    const actions = await this.session.streamdeck.eachProfileFolder((profileFolder, profilesV2) =>
+    this.inspectProfileFolders(profileFolder, profilesV2)
+    )
+    const badActions: BadAction[] = actions
+    .reduce((all, now) => {
+      all.push(...now)
+      return all
+    },[])
+    
+    this.badActions = badActions
+    this.searched = true
+    --this.session.loading
+  }
+  
+  async fixBadActions() {
+    ++this.session.loading
+    await Promise.all( this.fixByBadActions(this.badActions) )
+    this.badActions.length = 0
+    this.load()
+    --this.session.loading
   }
 
-  fixBadActions(badActions: BadAction[]) {
+  fixByBadActions(badActions: BadAction[]) {
     return badActions.map(badAction => {
       badAction.action.Settings.ProfileUUID = badAction.fixProfile
       const write = JSON.stringify(badAction.profile, null, 2)
@@ -100,7 +78,7 @@ export class FixProfilesNavComponent {
         all.push(...now)
         return all
       },[])
-
+    
     return badActions
   }
 
@@ -113,32 +91,54 @@ export class FixProfilesNavComponent {
     }
   ): Promise<BadAction[]> {
     const manifest = await dir.file('manifest.json')
-    const profile = await manifest.readAsJson() as Profile
-    const actions = Object.values(profile.Controllers[0].Actions)
+    const profile = await manifest.readAsJson() as ProfileFolderManifest
+    const controlActions = profile.Controllers[0].Actions
+    const actions: ProfileAction[] = Object.values(controlActions)
 
-    // loop each action and diagnosis
-    const inspectedActions = actions.map( action => this.inspectAction(action, {
+    const meta = {
       profile,
       profileManifest,
       device: profileManifest.Device,
       profilesV2,
       profileFolder,
       manifest
-    }))
+    }
 
-    return (await Promise.all(inspectedActions)).filter(x => x) as BadAction[]
+    // loop each action and diagnosis
+    return this.inspectActions(actions, meta)
+  }
+
+  async inspectActions(
+    actions: ProfileAction[],
+    meta: InspectActionMeta
+  ): Promise<BadAction[]> {
+    const badActions: BadAction[] | undefined = []
+    // let inspectedActions: Promise<BadAction | undefined>[] = []
+
+    const inspectedActions = await Promise.all(
+      actions.map(async action => {  
+        if ( action.Actions ) {
+          const newmeta = { ...meta }
+          newmeta.rootAction = meta.rootAction || action
+          const innerBadActions = await this.inspectActions(action.Actions, newmeta)
+          badActions.push( ...innerBadActions )
+        }
+        
+        return this.inspectAction(action, meta)
+      })
+    )
+    
+    badActions.push(...(await Promise.all(inspectedActions)).filter(x => x) as BadAction[])
+    
+    return badActions
   }
 
   async inspectAction(
     action: ProfileAction,
-    {device, manifest, profilesV2, profileManifest, profileFolder, profile}: {
-      profile: Profile
-      device: Device
-      profileManifest: DeviceProfile
-      manifest: DmFileReader
-      profilesV2: DirectoryManager
-      profileFolder: DirectoryManager
-    }
+    {
+      device, manifest, rootAction,
+      profilesV2, profileManifest, profileFolder, profile
+    }: InspectActionMeta
   ): Promise<BadAction | undefined> {
     if ( action.Name !== 'Switch Profile' ) {
       return // not an action we are interested in
@@ -147,7 +147,6 @@ export class FixProfilesNavComponent {
     // record the device model of current profile. We will eventually check if it matches Switch Profiles
     const model = device.Model
     const uuid = device.UUID
-
     const targetProfile = action.Settings.ProfileUUID // where it points to
     const targetManifestFile = await this.getManifestFileByProfileUuid(targetProfile, profilesV2)
 
@@ -158,19 +157,24 @@ export class FixProfilesNavComponent {
       badProfileName: profileManifest.Name,
     }
 
-    if ( !targetManifestFile ) {
-      console.log('cant find manifest.json in ' + targetProfile + '')
-      
-      const fixByImage = await this.findSwitchFixByActionImageCompare(action, device, profilesV2)
+    const runFixByImageCompare = async () => {
+      const fixByImage = await this.findSwitchFixByActionImageCompare(action, {device, profilesV2, rootAction: rootAction || action})
       if ( !fixByImage ) {
         return
       }
 
-      return {
+      const badAction: BadAction = {
         ...badActionPrep,
         targetProfileName: fixByImage.targetProfileName,
         fixProfile: fixByImage.fixProfile,
       }
+
+      return badAction
+    }
+
+    if ( !targetManifestFile ) {
+      console.log('cant find manifest.json in ' + targetProfile + '')
+      return await runFixByImageCompare()
     }
 
     const targetManifest = await targetManifestFile.readAsJson() as any
@@ -178,6 +182,18 @@ export class FixProfilesNavComponent {
 
     // does the current device match the referenced profile device? If not we need to repair
     if ( targetModel === model && targetManifest.Device.UUID === uuid ) {
+      const parentNameMatch = profileManifest.Name === targetManifest.Name
+      const parentPath = profileFolder.path
+      const parentProfileFolderId = parentPath.split('/').pop()?.split('.').shift() as string
+      const profileIdsMatch = targetProfile.toLowerCase() === parentProfileFolderId.toLowerCase()
+      const isSelfReferencing = parentNameMatch && profileIdsMatch
+      
+      // if this action just jumps to its owner profile, lets try by image compare
+      if ( isSelfReferencing ) {
+        const results = await runFixByImageCompare()
+        return results
+      }
+
       return // its a good reference, no need to continue
     }
 
@@ -221,55 +237,110 @@ export class FixProfilesNavComponent {
   */
   async findSwitchFixByActionImageCompare(
     action: ProfileAction,
-    device: Device,
-    profilesV2: DirectoryManager
+    {device, profilesV2, rootAction}: {
+      device: Device,
+      profilesV2: DirectoryManager,
+      rootAction: ProfileAction
+    }
   ): Promise<{fixProfile:string, targetProfileName:string} | undefined> {
-    // 1.
-    const states = action.States
-    
-    const profileFolders = (await profilesV2.getFolders()).filter( manifestFolderOnly )
+    const states = rootAction.States    
+    const folders = await profilesV2.getFolders()
+    const manifestCheck = folders.map( manifestFolderOnly )
+    const profileFolders = (await Promise.all(manifestCheck)).filter(x => x) as DirectoryManager[]
 
-    return await awaitFind(profileFolders, async folder => {
-      const profilesFolder = await folder.getDirectory('Profiles')
+    const results =  await awaitFind(profileFolders, async (folder, index) => {
+      const profilesFolder: DirectoryManager = await folder.getDirectory('Profiles')
       const profilesFolders = (await profilesFolder.getFolders()).filter( manifestFolderOnly )
-      return await awaitFind(profilesFolders, async folder => {
-        const profileFolderManifestFile = await folder.file('manifest.json')
-        const profileFolderManifest = await profileFolderManifestFile.readAsJson() as Profile
-        const actionsObject = profileFolderManifest.Controllers[0].Actions
-        const actions = Object.values(actionsObject)
-        return await awaitFind(actions,async action => {
-            if ( !action.States || action.States.length !== states.length ) {
-              return
-            }
-
-            const matches = action.States.filter((state, index) => state.Image === states[index].Image)
-            
-            if ( matches.length !== states.length ) {
-              return // cant be our match
-            }
-
-            const uuid = action.Settings.ProfileUUID
-            const targetManifestFile = await this.getManifestFileByProfileUuid(uuid, profilesV2)
-            
-            if ( !targetManifestFile ) {
-              console.warn(`could not load a Switch Profile ${uuid}`)
-              return
-            }
-
-            const targetManifest = await targetManifestFile.readAsJson() as DeviceProfile
-            const newMatch = await this.matchProfileFolderByNameAndDevice(targetManifest.Name, device, profilesV2)
-
-            if ( !newMatch ) {
-              console.warn(`cannot find new match to target ${targetManifest.Name}`)
-            }
-
-            return {
-              fixProfile: newMatch?.split('.').shift() as string,
-              targetProfileName: targetManifest.Name
-            }
-          })
-      })
+      const results = await awaitFind(profilesFolders, x => this.imageScanProfileFolder(x, { states, profilesV2, action, device }))
+      return results
     })
+
+    return results
+  }
+
+  async imageScanProfileFolder(
+    folder: DirectoryManager,
+    { states, profilesV2, action, device }: {
+      states: State[]
+      profilesV2: DirectoryManager
+      action: ProfileAction
+      device: Device
+    }
+  ) {
+    const profileFolderManifestFile = await folder.file('manifest.json')
+    const profileFolderManifest = await profileFolderManifestFile.readAsJson() as ProfileFolderManifest
+    const actionsObject: Actions = profileFolderManifest.Controllers[0].Actions
+
+    const actions = Object.values(actionsObject)
+      .filter(subaction => {
+        const statesMatched = subaction.States.length === states.length
+
+        if ( !statesMatched ) {
+          return // can't be the one we want
+        }
+  
+        const matches = subaction.States.filter((state, index) => state.Image === states[index].Image)
+        // const matches2 = subaction.States.filter((state, index) => state.Image === rootAction.States[index].Image)
+        const fullMatch = matches.length === states.length
+  
+        if ( !fullMatch ) {
+          return // cant be our match
+        }
+
+        return subaction
+      })
+
+    const finds = await awaitFind(actions,async subaction => {
+      return this.lookForSwitchAction(subaction, { states, profilesV2, action, device })
+    })
+
+    return finds
+  }
+
+  async lookForSwitchAction(
+    subaction: ProfileAction,
+    { states, profilesV2, action, device }: ImageHuntMeta
+  ): Promise<undefined | {fixProfile: string, targetProfileName: string}> {
+    if ( subaction.Actions ) {
+      const subActionSwitchFind = await awaitFind(subaction.Actions, action => {
+        return this.lookForSwitchAction(action, { states, profilesV2, action, device })
+      })
+
+      if ( subActionSwitchFind ) {
+        return subActionSwitchFind
+      }
+
+      return 
+    }
+
+    if ( !subaction.Settings ) {
+      return
+    }
+    
+    const uuid = subaction.Settings.ProfileUUID
+    if ( !uuid ) {
+      return
+    }
+
+    const targetManifestFile = await this.getManifestFileByProfileUuid(uuid, profilesV2)
+    
+    if ( !targetManifestFile ) {
+      console.warn(`could not load a Switch Profile ${uuid}`)
+      return
+    }
+
+    const targetManifest = await targetManifestFile.readAsJson() as DeviceProfile
+    const newMatch = await this.matchProfileFolderByNameAndDevice(targetManifest.Name, device, profilesV2)
+
+    if ( !newMatch ) {
+      console.warn(`cannot find new match to target ${targetManifest.Name}`)
+      return
+    }
+
+    return {
+      fixProfile: newMatch?.split('.').shift() as string,
+      targetProfileName: targetManifest.Name
+    }
   }
 
   /** Looks for a correcting profile uuid for a switch action
@@ -342,20 +413,27 @@ export class FixProfilesNavComponent {
   }
 }
 
-// a function to reduce folders down to only ones containing a manifest.json file
-async function manifestFolderOnly(folder: DirectoryManager): Promise<DirectoryManager | undefined> {
-  const file = await folder.findFileByPath('manifest.json')
-  if ( file ) {
-    return folder
-  }
-
-  return undefined
-}
-
 async function awaitFind<T, G>(
   array: G[],
   method: (one: G, index: number) => T | undefined
 ): Promise<T | undefined> {
   const results = await Promise.all(array.map(method))
   return results.find(x => x)
+}
+
+interface InspectActionMeta {
+  profile: ProfileFolderManifest
+  device: Device
+  profileManifest: DeviceProfile
+  manifest: DmFileReader
+  profilesV2: DirectoryManager
+  profileFolder: DirectoryManager
+  rootAction?: ProfileAction
+}
+
+interface ImageHuntMeta {
+  action: ProfileAction
+  states: State[]
+  profilesV2: DirectoryManager
+  device: Device
 }

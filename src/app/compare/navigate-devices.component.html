@@ -1,0 +1,24 @@
+<select-elgato-session-directory (change)="setDirectory($event)"></select-elgato-session-directory>
+
+<div class="pad-v" *ngIf="session.streamdeck.dir && !devices.length">
+  No devices found. No profile folders with manifest.json file with "Device" were found.
+</div>
+
+<!-- views -->
+<div class="child-margin-xxs">
+  <div *ngFor="let deviceView of deviceViews">
+    <h4>{{deviceView.device.Model}} - {{deviceView.device.UUID}}</h4>
+    {{ deviceView.currentProfile.deviceRead.manifest.Name }}
+    <table cellSpacing="10" border="0">
+      <tr *ngFor="let row of deviceView.buttons; let rowIndex = index">
+        <td class="border border-white pad-xxs" *ngFor="let column of row; let index=index">{{rowIndex}}-{{index}}</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- add a view -->
+<div *ngIf="devices.length" class="child-margin-xxs">
+  <button *ngFor="let item of devices" type="button" (click)="addDevice(item)"
+  >{{item.Model}} - {{item.UUID}}</button>
+</div>

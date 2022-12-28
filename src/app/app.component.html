@@ -8,28 +8,35 @@
       </div>
     </div>
   </div>
-  <div class="child-margin-v-xxs child-margin-h-xs text-smx border-top border-white flex-valign-center flex-wrap" style="background-color: rgb(5, 46, 124);">
-    <a *ngIf="routeState.RouteWatchReporter.$history.length > 1"
-      [title]="'back upto ' + routeState.RouteWatchReporter.$history.length + ' times'"
-      (click)="routeState.goBackOrUp()"
-    >⬅️</a>
-    <a *ngIf="routeState.current.config?.path !== 'menu'"
-      title="navigate up"
-      (click)="routeState.goUp()"
-    >⬆️</a>
-    <ng-container *ngFor="let item of routeState.crumbArray;let index=index">
-      <span *ngIf="index > 0" class="opacity-80">>></span>
-      <ng-container *ngIf="index === routeState.crumbArray.length - 1; else link">
-        <span class="pad-xxs" title="you are here"
-        >{{item.config.data ? item.config.data['emoji']+' ' : ''}}{{ $any(item.config.title || item.config.path) | titlecase }}</span>
+  <div class="text-smx border-top border-white flex-wrap flex-valign-center pad-right"
+    style="background-color: rgb(5, 46, 124);"
+  >
+    <div class="flex-1 child-margin-v-xxs child-margin-h-xs flex-valign-center flex-wrap">
+      <a *ngIf="routeState.RouteWatchReporter.$history.length > 1"
+        [title]="'back upto ' + routeState.RouteWatchReporter.$history.length + ' times'"
+        (click)="routeState.goBackOrUp()"
+      >⬅️</a>
+      <a *ngIf="routeState.current.config?.path !== 'menu'"
+        title="navigate up"
+        (click)="routeState.goUp()"
+      >⬆️</a>
+      <ng-container *ngFor="let item of routeState.crumbArray;let index=index">
+        <span *ngIf="index > 0" class="opacity-80">>></span>
+        <ng-container *ngIf="index === routeState.crumbArray.length - 1; else link">
+          <span class="pad-xxs" title="you are here"
+          >{{item.config.data ? item.config.data['emoji']+' ' : ''}}{{ $any(item.config.title || item.config.path) | titlecase }}</span>
+        </ng-container>
+        <ng-template #link>
+          <a class="text-white no-a-style underline pad-xxs"
+            [routerLink]="item.config.path"
+          >{{item.config.data ? item.config.data['emoji']+' ' : ''}}<u>{{ $any(item.config.title || item.config.path) | titlecase }}</u></a>
+        </ng-template>
       </ng-container>
-      <ng-template #link>
-        <a class="text-white no-a-style underline pad-xxs"
-          [routerLink]="item.config.path"
-        >{{item.config.data ? item.config.data['emoji']+' ' : ''}}<u>{{ $any(item.config.title || item.config.path) | titlecase }}</u></a>
-      </ng-template>
-    </ng-container>
-  </div>  
+    </div>
+    <div *ngIf="session.loading">
+      ⏱ Loading...
+    </div>      
+  </div>
 </div>
 
 <div style="height:95px"></div>
@@ -47,22 +54,34 @@
     </div>
   </div>
   
-  <ng-container *ngIf="routeState.current.config && routeState.current.config.data">
-    <ng-container *ngTemplateOutlet="title;context:{title:routeState.current.config.title || routeState.current.config.data['title']}"></ng-container>
-    <ng-template #title let-title="title">
-      <h2>
-        {{routeState.current.config.data ? routeState.current.config.data['emoji'] + '&nbsp;' : ''}}
-        {{ title | titlecase }}
-      </h2>
-    </ng-template>
-    <p>{{ routeState.current.config.data['description'] }}</p>
-  </ng-container>
-  
-  <div [ngClass]="routeState.current.config && routeState.current.config.data && routeState.current.config.data['wrapClass']"
-    style="min-width:40vw"
-  >
-    <router-outlet></router-outlet>
-    <route-reporter #routeState="RouteReporter"></route-reporter>
+  <div style="min-width:70vw" class="flex-stacked">
+    <div *ngIf="routeState.current.config && routeState.current.config.data">
+      <ng-container *ngTemplateOutlet="title;context:{title:routeState.current.config.title || routeState.current.config.data['title']}"></ng-container>
+      <ng-template #title let-title="title">
+        <h2>
+          {{routeState.current.config.data ? routeState.current.config.data['emoji'] + '&nbsp;' : ''}}
+          {{ title | titlecase }}
+        </h2>
+      </ng-template>
+      <p>{{ routeState.current.config.data['description'] }}</p>
+    </div>
+
+    <div [ngClass]="routeState.current.config && routeState.current.config.data && routeState.current.config.data['wrapClass']"
+      style="min-height:50vh;"
+    >
+      <router-outlet #routerOutlet="outlet"></router-outlet>
+      <route-reporter #routeState="RouteReporter"></route-reporter>
+      <!--
+        <fx-tracker #fx="FxTracker" [activatedRoute]="routeState.activated"></fx-tracker>      
+      -->
+    </div>
+    <div *ngIf="routeState.current.config?.path !== 'menu'"
+      class="flex-1 flex margin-top"
+    >
+      <button type="button" class="bg-dark flex-1"
+        title="navigate back or up" (click)="routeState.goBackOrUp()"
+      >⬅️ BACK</button>
+    </div>
   </div>
 
   <br /><br />
@@ -70,20 +89,21 @@
   <div class="text-center text-white text-xs">
     <div class="opacity-half">🔗 helpful links</div>
     <div class="bg-black text-white pad radius-10">
-      <a class="text-white nowrap" target="_blank"
+      <!--
+        <a class="text-white nowrap" target="_blank"
         href="https://github.com/AckerApple/megacade"
-      >📕 problem sloving docs</a>
+        >📕 problem sloving docs</a>
+      -->
       
       <sup class="pad-h-xs text-3x">.</sup>
       
-      <a class="nowrap" href="https://extremehomearcades.com/"
-        style="color:#07e843"
-      >Extreme Home Arcades</a>
+      <a class="nowrap" href="https://www.elgato.com/" class="text-white">⠶ Elgato</a>
       
       <sup class="pad-h-xs text-3x">.</sup>
       
-      <a class="text-white nowrap" href="https://www.elgato.com/en/stream-deck"
-      >▶️ EHA Unite Group</a>
+      <a class="text-white nowrap"
+        href="https://www.elgato.com/en/stream-deck-mk2"
+      >▶️ Stream Deck</a>
     </div>
   </div>
 

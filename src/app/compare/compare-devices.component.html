@@ -1,0 +1,58 @@
+<select-elgato-session-directory (change)="setDirectory($event)"></select-elgato-session-directory>
+
+<div class="pad-v" *ngIf="session.streamdeck.dir && !devices.length">
+  No devices found. No profile folders with manifest.json file with "Device" were found.
+</div>
+
+<div *ngIf="devices.length" class="pad-v">
+  <div class="flex-wrap child-margin-xs">
+    <div class="flex1">
+      <div>Compare <b>from</b></div>
+      <select (change)="setDeviceFrom($any($event.target).value)" class="width-full">
+        <option value=""></option>
+        <ng-container *ngFor="let item of devices">
+          <ng-container *ngIf="deviceWith?.UUID != item.UUID">
+            <option [value]="item.UUID">{{item.Model}} - {{item.UUID}}</option>
+          </ng-container>
+        </ng-container>
+      </select>     
+    </div>
+
+    <div class="flex1">
+      <div>Compare <b>with</b></div>
+      <select (change)="setDeviceWith($any($event.target).value)" class="width-full">
+        <option value=""></option>
+        <ng-container *ngFor="let item of devices">
+          <ng-container *ngIf="deviceFrom?.UUID != item.UUID">
+            <option [value]="item.UUID">{{item.Model}} - {{item.UUID}}</option>
+          </ng-container>
+        </ng-container>
+      </select>
+    </div>
+
+    <div *ngIf="deviceFrom && deviceWith && deviceFrom.UUID != deviceWith.UUID" class="flex1">
+      <div>&nbsp;</div>
+      <button type="button" class="width-full bg-positive"
+        (click)="compare()"
+      >COMPARE</button>
+    </div>
+  </div>
+
+</div>
+
+<ng-container *ngIf="compared">
+  <div class="pad-v" *ngIf="notFoundProfiles.length; else allProfilesFound">
+    <!-- code find hint: profiles not found. profile not found-->
+    <h3>{{ notFoundProfiles.length }} Profile{{ notFoundProfiles.length > 1 ? 's' : ''}} not found</h3>
+    <p class="text-warning">This cannot be fixed using this app</p>
+    <ul>
+      <li *ngFor="let item of notFoundProfiles">
+        {{ item.notInProfile.manifest.Name }} - {{ item.compareType }}
+      </li>
+    </ul>
+  </div>
+</ng-container>
+
+<ng-template #allProfilesFound>
+  <h3>✅ All Profiles Found</h3>
+</ng-template>

@@ -1,11 +1,16 @@
-<div class="text-center">
-  <!--(directoryManagerChange)="session.save();session.streamDeck=$event;setDirectory($event)"-->
-  <!--(error)="session.error('could not load StreamDeck path', $event)"-->
-  <!-- [reloadPath]="session.config.launchBox.path"-->
-  <robust-select-directory label="StreamDeck"
-    [(directoryManager)]="streamDeckDir"
-    (directoryManagerChange)="setDirectory($event)"
-  ></robust-select-directory>
-</div>
+<select-elgato-session-directory></select-elgato-session-directory>
 
-🍎: ~/Library/Application Support/com.elgato.StreamDeck/
+<button *ngIf="session.streamdeck.dir" type="button" class="bg-calm"
+  (click)="load()"
+>🔦 find bad actions</button>
+
+<div class="pad-v" *ngIf="session.streamdeck.dir && searched">
+  {{ badActions.length }} bad actions found
+  
+  <button *ngIf="badActions.length" type="button"
+    (click)="fixBadActions()"
+  >fix bad actions</button>
+        
+  <textarea *ngIf="badActions.length" class="width-full" rows="12" wrap="off"
+  >{{ badActions | json }}</textarea>
+</div>
