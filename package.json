@@ -1,6 +1,6 @@
 {
   "name": "stream-deck-tools",
-  "version": "0.0.13",
+  "version": "0.0.16",
   "scripts": {
     "ng": "ng",
     "clear": "rm -rf .angular/cache",
@@ -15,7 +15,8 @@
     "patch:version": "npm --no-git-tag-version version patch",
     "save": "npm run patch:version && git add . && git commit -m \"update\" && git push",
     "deploy": "npm run save && npm run deploy:gh-pages",
-    "deploy:gh-pages": "npm run build:gh-pages && cd ../gh-pages && git add . && git commit -m \"update\" && git push"
+    "deploy:gh-pages": "npm run build:gh-pages && npm run save:gh-pages",
+    "save:gh-pages": "cd ../gh-pages && git add . && git commit -m \"update\" && git push"
   },
   "private": true,
   "dependencies": {
