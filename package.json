@@ -1,15 +1,16 @@
 {
   "name": "stream-deck-tools",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "scripts": {
     "ng": "ng",
     "clear": "rm -rf .angular/cache",
     "start": "ng serve --host 0.0.0.0 --disable-host-check",
     "watch": "npm run start",
     "build": "ng build",
-    "build:gh-pages": "ng build && npm run dist:copy && npm run gh-pages:adjust",
+    "build:gh-pages": "ng build && npm run dist:copy && npm run gh-pages:adjust && npm run dist:404",
     "gh-pages:adjust": "node gh-pages-adjust",
     "dist:copy": "cp -r ./dist/webapp/* ../gh-pages",
+    "dist:404": "cp ../gh-pages/index.html ../gh-pages/404.html",
     "build:watch": "ng build --watch --configuration development",
     "test": "ng test",
     "patch:version": "npm --no-git-tag-version version patch",
