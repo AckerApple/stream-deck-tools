@@ -2,7 +2,8 @@ import { Component } from '@angular/core'
 import { DirectoryManager, DmFileReader } from 'ack-angular-components/directory-managers/DirectoryManagers';
 import { Actions, Device, DeviceProfile, ProfileAction, ProfileFolderManifest } from '../elgato.types';
 import { SessionProvider } from '../session.provider';
-import { getProfileHomeDirByDir, ProfileFolderManifestRead, ProfileManifestRead } from '../StreamDeck.class';
+import { getChildFoldersInProfileDir, getProfileHomeDirByDir, ProfileFolderManifestRead, ProfileManifestRead } from '../StreamDeck.class';
+import { getChildByAction } from './navigate-devices.component';
 
 interface Compare {
   compareType: 'not-in-from' | 'not-in-with'
@@ -18,17 +19,6 @@ interface Compare {
 interface NotInProfile {
   file: DmFileReader // existing manifest file
   manifest: DeviceProfile // existing manifest {Name: string}
-}
-
-interface NotInActions {
-  notInFile: DmFileReader // manifest file missing control.action
-  manifest: ProfileFolderManifest // manifest missing control.action
-
-  actions: Actions
-  inProfileDir: DirectoryManager // the directory we are coming FROM so we can grab images
-  
-  // missing in profile parent details
-  profileParent: ProfileManifestRead
 }
 
 @Component({
@@ -71,55 +61,12 @@ export class CompareDevicesComponent {
     }
 
     this.notFoundProfiles.length = 0
-    const uuids = [this.deviceFrom.UUID, this.deviceWith.UUID]
 
-    function getProfileFolderIterator(direction: 'from' | 'with') {
-      return async (profileManifestRead: ProfileManifestRead) => {    
-        return {
-          type: direction,
-          manifest: profileManifestRead.manifest,
-          manifestFile: profileManifestRead.manifestFile,
-          dir: profileManifestRead.dir,
-        }
-      }
-    }
-
-    const allFromProfiles = await this.session.streamdeck.eachProfileFolderByDeviceId(this.deviceFrom.UUID, getProfileFolderIterator('from'))
-    const allWithProfiles = await this.session.streamdeck.eachProfileFolderByDeviceId(this.deviceWith.UUID, getProfileFolderIterator('with'))
-    
-    const allProfiles = [...allFromProfiles, ... allWithProfiles]
-
-    const { fromProfiles, withProfiles } = allProfiles.reduce((all, now) => {
-      if ( !now ) {
-        return all // skip not wanted
-      }
-
-      if ( now.type === 'from' ) {
-        all.fromProfiles.push({
-          manifest: now.manifest,
-          manifestFile: now.manifestFile,
-          dir: now.dir,
-        })
-      } else {
-        all.withProfiles.push({
-          manifest: now.manifest,
-          manifestFile: now.manifestFile,
-          dir: now.dir,
-        })
-      }
-
-      return all
-    }, {
-      fromProfiles: [], withProfiles: []
-    } as {
-      fromProfiles: ProfileManifestRead[],
-      withProfiles: ProfileManifestRead[]
-    })
+    const fromProfiles = await this.session.streamdeck.getProfileFoldersByDeviceId(this.deviceFrom.UUID)
+    const withProfiles = await this.session.streamdeck.getProfileFoldersByDeviceId(this.deviceWith.UUID)
 
     this.notFoundProfiles = this.findMissingProfiles(fromProfiles, withProfiles)
     this.notFoundActions = await this.findMissingActions(fromProfiles, withProfiles)
-    console.log('this.notFoundProfiles', this.notFoundProfiles)
-    console.log('this.notFoundActions', this.notFoundActions)
     this.compared = true
   }
 
@@ -147,7 +94,7 @@ export class CompareDevicesComponent {
     fromProfiles: ProfileManifestRead[],
     withProfiles: ProfileManifestRead[],
     compareType: 'not-in-from' | 'not-in-with'
-  ): Promise<any> { // NotInActionsCompare[]
+  ): Promise<NotInActionsCompare[]> {
     const promises = fromProfiles.map(async fromProfile => {
       const foundProfile = findProfileNameMatch(fromProfile, withProfiles)
 
@@ -163,16 +110,18 @@ export class CompareDevicesComponent {
         return
       }
 
-      const result = compareProfileFolders(fromProfileHomeDir, foundProfileHomeDir, fromProfile, compareType)
-
-      if ( !Object.keys(result.notInActions.actions).length ) {
-        return
-      }
-
-      return result
+      const results = await compareProfileFolders(fromProfileHomeDir, foundProfileHomeDir, fromProfile, compareType)
+      
+      return results
     })
 
-    return (await Promise.all(promises)).filter(x => x)
+    const results = await Promise.all(promises)
+    const validResults = results.filter(x => x) as NotInActionsCompare[][]
+    const flatResults = validResults.reduce((all, inner) => {
+      all.push(...inner)
+      return all
+    }, [] as NotInActionsCompare[])
+    return flatResults
   }
 
   findMissingProfilesByMode(
@@ -201,11 +150,37 @@ export class CompareDevicesComponent {
       return notInProfile
     })
   }
+
+  async fixNotFoundAction(
+    key: string,
+    action: ProfileAction,
+    compare: NotInActionsCompare,
+  ) {
+    const notInActions = compare.notInActions
+    const manifest = notInActions.manifest
+    const placeInActions = manifest.Controllers[0].Actions
+    compare.notInActions.actions
+    placeInActions[ key ] = action
+    const newManifest = JSON.stringify(manifest, null, 2)
+    await compare.notInActions.notInFile.write(newManifest)
+    delete compare.notInActions.actions[key]
+  }
 }
 
 interface NotInProfileCompare extends Compare {
   itemType: 'profile'
   notInProfile: NotInProfile
+}
+
+interface NotInActions {
+  notInFile: DmFileReader // manifest file missing control.action
+  manifest: ProfileFolderManifest // manifest missing control.action
+
+  actions: Actions
+  inProfileDir: DirectoryManager // the directory we are coming FROM so we can grab images
+  
+  // missing in profile parent details
+  profileParent: ProfileManifestRead
 }
 
 interface NotInActionsCompare extends Compare {
@@ -222,22 +197,68 @@ function findProfileNameMatch(
   })
 }
 
-function compareProfileFolders(
+async function compareProfileActionForKids(
+  fromAction: ProfileAction,
+  fromFolder: ProfileFolderManifestRead,
+  withAction: ProfileAction,
+  withFolder: ProfileFolderManifestRead,
+  profileParent: ProfileManifestRead,
+  compareType: 'not-in-from' | 'not-in-with'
+): Promise<NotInActionsCompare[]> {
+  if ( fromAction.UUID !== 'com.elgato.streamdeck.profile.openchild' ) {
+    return [] // not interested
+  }
+  
+  const fromChild = await getChildByAction(fromAction, fromFolder)
+  if ( !fromChild ) {
+    // TODO: find a way to notate that
+    return [] // cannot find child so we can't continue
+  }
+  
+  const withChild = await getChildByAction(withAction, withFolder)
+  if ( !withChild ) {
+    // TODO: find a way to notate that
+    return []// cannot find child so we can't continue
+  }
+
+  const results = await compareProfileFolders(
+    fromChild.folder,
+    withChild.folder, 
+    profileParent,
+    compareType
+  )
+
+  return results
+}
+
+async function compareProfileFolders(
   fromFolder: ProfileFolderManifestRead,
   withFolder: ProfileFolderManifestRead,
   profileParent: ProfileManifestRead,
   compareType: 'not-in-from' | 'not-in-with'
-): NotInActionsCompare {
+): Promise<NotInActionsCompare[]> {
+  const results: NotInActionsCompare[] = []
   const fromActions = fromFolder.manifest.Controllers[0].Actions
   const withActions = withFolder.manifest.Controllers[0].Actions
 
-  const missingActions = Object.entries(fromActions).map(([key, action]) => {
-    if ( withActions[key] ) {
+  const promises = Object.entries(fromActions).map(async ([key, action]) => {
+    const withAction = withActions[key]
+    if ( withAction ) {
+      const kidResults = await compareProfileActionForKids(
+        action,
+        fromFolder,
+        withAction,
+        withFolder,
+        profileParent,
+        compareType
+      )
+      results.push(...kidResults)
       return // the action was found, skip it
     }
 
     return { key, action }
-  }).filter(x => x) as {key:string, action:ProfileAction}[]
+  })
+  const missingActions = (await Promise.all(promises)).filter(x => x) as {key:string, action:ProfileAction}[]
 
   const result: NotInActionsCompare = {
     compareType,
@@ -258,5 +279,10 @@ function compareProfileFolders(
     }
   }
 
-  return result
+  if ( Object.keys(result.notInActions.actions).length ) {
+    console.log('bad action push')
+    results.push(result)
+  }
+
+  return results
 }

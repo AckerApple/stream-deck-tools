@@ -15,12 +15,18 @@ export interface DeviceProfile {
 
 export interface State {
   Image: string
+  ShowTitle?: boolean
+  Title?: string
+  TitleAlignment?: string
+  FontSize?: number
 }
 
 export interface ProfileAction {
   Name: string
   Settings: {
     ProfileUUID: string
+    DeviceUUID: string
+    PageIndex: number
   }
   States: State[]
   Actions?: ProfileAction[]

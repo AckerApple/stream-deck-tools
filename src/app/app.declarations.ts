@@ -10,11 +10,16 @@ import { MenuStackListComponent } from './menu-stack-list.component'
 import { ExitComponent } from './exit.component'
 import { SelectElgatoSessionDirectoryComponent } from './select-elgato-session-directory.component'
 import { NavigateDevicesComponent } from './compare/navigate-devices.component'
+import pipes from './app.pipes'
+import { PageButtonsComponent } from './compare/page-buttons.component'
+import { PageButtonComponent } from './compare/page-button.component'
 
 export const declarations = [
   AppComponent,
   
   MenuComponent,
+  PageButtonsComponent,
+  PageButtonComponent,
   DebugComponent,
   SelectElgatoSessionDirectoryComponent,
   
@@ -22,7 +27,8 @@ export const declarations = [
   FixProfilesNavComponent,
   CompareDevicesComponent,
   MenuStackListComponent,
-  ExitComponent
+  ExitComponent,
+  ...pipes,
 ]
 
 export default declarations

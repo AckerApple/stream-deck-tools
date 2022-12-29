@@ -8,12 +8,34 @@
 <div class="child-margin-xxs">
   <div *ngFor="let deviceView of deviceViews">
     <h4>{{deviceView.device.Model}} - {{deviceView.device.UUID}}</h4>
-    {{ deviceView.currentProfile.deviceRead.manifest.Name }}
-    <table cellSpacing="10" border="0">
-      <tr *ngFor="let row of deviceView.buttons; let rowIndex = index">
-        <td class="border border-white pad-xxs" *ngFor="let column of row; let index=index">{{rowIndex}}-{{index}}</td>
-      </tr>
-    </table>
+    <select [(ngModel)]="deviceView.currentProfileName" (change)="gotoProfileByName(deviceView.currentProfileName, deviceView)">
+      <option *ngFor="let item of deviceView.allProfiles" [value]="item.manifest.Name"
+      >{{ item.manifest.Name }}</option>
+    </select>
+
+    <div class="flex-wrap">
+      <div class="pad-xs">
+        <page-buttons [directory]="deviceView.currentProfile.dir"
+          [actions]="deviceView.currentProfile.manifest.Controllers[0].Actions"
+          [gridLayout]="deviceView.gridLayout"
+          (buttonDblClick)="activateItem($event, deviceView)"
+          (buttonClick)="deviceView.action = deviceView.action === $event ? undefined : $event"
+        ></page-buttons>
+        <div class="text-center text-xxxs opacity-60">profile path: {{ deviceView.currentProfile.deviceRead.dir.path }}</div>
+      </div>
+      <div class="flex-stacked" *ngIf="deviceView.action">
+        <textarea class="flex1" rows="12" wrap="off"
+          readonly style="min-width:35vw"
+        >{{ deviceView.action | json }}</textarea>
+        <button type="button" class="bg-assertive width-full"
+          (click)="deleteDeviceViewAction(deviceView)"
+        >🗑 DELETE</button>
+      </div>
+    </div>
+    
+    <button type="button" (click)="deviceView.viewJson = !deviceView.viewJson">🔩 view json</button>
+    <textarea *ngIf="deviceView.viewJson" readonly class="width-full" rows="12" wrap="off"
+    >{{ deviceView.currentProfile.manifest | json }}</textarea>
   </div>
 </div>
 
@@ -22,3 +44,72 @@
   <button *ngFor="let item of devices" type="button" (click)="addDevice(item)"
   >{{item.Model}} - {{item.UUID}}</button>
 </div>
+
+<!-- help select child modal -->
+<ack-modal *ngIf="selectFolder" (close)="selectFolder=undefined">
+  <div class="bg-dark pad">
+    <h3>👇 Select and save which child page</h3>
+    <p>ℹ️ This app does not have enough access/ability to read your StreamDeck private cache. However select this page once and we can 💾 save this association for next time.</p>
+    <div class="flex-center flex-valign-center overflow">
+      <div class="pad bg-grey radius-5">
+        <ng-container *ngIf="!selectFolder.choice">
+          <page-buttons [directory]="selectFolder.folders[selectFolder.index].folder.dir"
+            [gridLayout]="selectFolder.gridLayout"
+            [actions]="selectFolder.folders[selectFolder.index].folder.manifest.Controllers[0].Actions"
+          ></page-buttons>
+          <div class="text-center text-xxs opacity-60">{{selectFolder.index + 1}} of {{selectFolder.folders.length}}</div>
+          <div class="flex child-margin-xxs">
+            <button type="button"
+              (click)="selectFolder.index = selectFolder.index === 0 ? selectFolder.folders.length - 1 : selectFolder.index-1"
+            >⬅️ BACK</button>
+            
+            <button type="button" class="flex-1"
+              (click)="selectFolder.choice = selectFolder.folders[selectFolder.index]"
+            >SELECT CHILD</button>
+      
+            <button type="button" (click)="selectFolder.index = selectFolder.index === selectFolder.folders.length - 1 ? 0 : selectFolder.index+1"
+            >➡️ NEXT</button>
+          </div>
+          <div class="text-center pad">
+            <a *ngIf="selectFolder.viewAll" class="text-xxs opacity-60"
+              (click)="activateChildFolder(selectFolder.action, selectFolder.deviceView, {viewAll:false})"
+            >📂 view unlinked</a>
+            <a *ngIf="!selectFolder.viewAll" class="text-xxs opacity-60"
+              (click)="activateChildFolder(selectFolder.action, selectFolder.deviceView, {viewAll:true})"
+            >📂 view all</a>
+          </div>
+        </ng-container>
+  
+        <ng-container *ngIf="selectFolder.choice">
+          <page-buttons [directory]="selectFolder.choice.folder.dir"
+            [gridLayout]="selectFolder.gridLayout"
+            [actions]="selectFolder.choice.folder.manifest.Controllers[0].Actions"
+          ></page-buttons>
+  
+          <p>We can save this association using one or more entries into the child folder back button</p>
+  
+          <div>
+            <input type="checkbox" id="saveIntoSettings" [(ngModel)]="selectFolder.saveIntoSettings" />
+            <label for="saveIntoSettings">
+              &nbsp;Save into Action.Settings
+            </label>
+          </div>
+  
+          <div>
+            <input type="checkbox" id="saveIntoTitle" [(ngModel)]="selectFolder.saveIntoTitle" />
+            <label for="saveIntoTitle">
+              &nbsp;Save into Action.Title
+            </label>
+          </div>
+  
+          <br />
+          <div class="flex child-margin-xxs">
+            <button type="button" class="flex-1"
+              (click)="saveChildAssociation()"
+            >💾 SAVE</button>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+</ack-modal>

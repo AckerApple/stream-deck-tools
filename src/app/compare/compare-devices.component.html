@@ -51,8 +51,33 @@
       </li>
     </ul>
   </div>
+
+  <!-- missing actions -->
+  <div class="pad-v" *ngIf="notFoundActions.length; else allActionFound">
+    <!-- code find hint: profiles not found. profile not found-->
+    <h3>{{ notFoundActions.length }} Actions{{ notFoundActions.length > 1 ? 's' : ''}} not found</h3>
+    <p class="text-warning">This cannot be fixed using this app</p>
+    <div class="flex-wrap">
+      <ng-container *ngFor="let item of notFoundActions">
+        <div *ngFor="let ak of item.notInActions.actions | keyvalue" class="flex-stacked flex-center">
+          <page-button [action]="ak.value" [directory]="item.notInActions.inProfileDir"></page-button>
+          <div>
+            {{ item.notInActions.profileParent.manifest.Name }} - {{ ak.value.Name }} <sup>({{item.compareType}})</sup>
+            <!--{{ ak.value.UUID }}-->
+          </div>
+          <div>
+            <button class="bg-calm" (click)="fixNotFoundAction(ak.key, ak.value, item)">🔧 fix</button>                  
+          </div>
+        </div>
+      </ng-container>
+    </div>
+  </div>
 </ng-container>
 
 <ng-template #allProfilesFound>
   <h3>✅ All Profiles Found</h3>
+</ng-template>
+
+<ng-template #allActionFound>
+  <h3>✅ All Actions Found</h3>
 </ng-template>

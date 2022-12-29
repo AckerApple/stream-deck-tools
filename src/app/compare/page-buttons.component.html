@@ -1,0 +1,14 @@
+<table cellspacing="15" border="0">
+  <tr *ngFor="let row of buttons; let rowIndex = index">
+    <td class="pad-xxs cursor-pointer" *ngFor="let column of row; let index=index"
+      [title]="rowIndex + '-' + index"
+      (click)="buttonClick.emit(column)"
+      (dblclick)="buttonDblClick.emit(column)"
+    >
+      <ng-container *ngIf="column">
+        <page-button [action]="column" [directory]="directory"></page-button>
+        <div class="text-xxxs opacity-60 text-center">{{ column.Name }}</div>
+      </ng-container>
+    </td>
+  </tr>
+</table>

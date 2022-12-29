@@ -1,0 +1,21 @@
+<div class="radius-20 border-grey border-3 pos-rel flex-center"
+  style="width:100px;height:100px;background-position: center;background-repeat: no-repeat;background-size: cover;"
+  [style.background-image] = "'url(' + ({dir:directory, imagePath:action.States[0].Image} | loadDirImage | async) + ')'"
+  [title]="'background-image:' + action.States[0].Image"
+  [class.flex-valign-middle] = "action.States[0].TitleAlignment === 'middle'"
+>
+  <div *ngIf="action.States[0].ShowTitle" class="text-center flex-1"
+    [style.font-size.px]="action.States[0].FontSize ? action.States[0].FontSize + 4 : 18"
+    style="white-space: pre;"
+  >{{ action.States[0].Title }}</div>
+
+  <div *ngIf="!action.States[0].Image">
+    <ng-container [ngSwitch]="action.UUID">
+      <ng-container *ngSwitchCase="'com.elgato.streamdeck.profile.backtoparent'">
+        <div class="text-center">
+          <span class="pos-abs rotate-90" style="top:35%;left:35%">↵</span>
+        </div>
+      </ng-container>
+    </ng-container>
+  </div>
+</div>
