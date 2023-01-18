@@ -1,14 +1,14 @@
 <div class="text-right">
-  <!--(directoryManagerChange)="session.save();session.streamDeck=$event;setDirectory($event)"-->
+  <!--(directoryManagerChange)="session.save();streamDeck=$event;setDirectory($event)"-->
   <!--(error)="session.error('could not load StreamDeck path', $event)"-->
   <!-- [reloadPath]="session.config.launchBox.path"-->
-  <robust-select-directory label="StreamDeck"
-    [(directoryManager)]="session.streamdeck.dir"
-    (directoryManagerChange)="change.emit(session.streamdeck.dir=$event)"
+  <robust-select-directory [label]="label"
+    [(directoryManager)]="streamdeck.dir"
+    (directoryManagerChange)="change.emit(streamdeck.dir=$event)"
   ></robust-select-directory>
 </div>
 
-<div class="pad-v" *ngIf="!session.streamdeck.dir">
+<div class="pad-v" *ngIf="!streamdeck.dir">
   <h4>Example paths</h4>
   🍎: ~/Library/Application Support/com.elgato.StreamDeck/
 </div>

@@ -3,17 +3,20 @@ import { Prompts } from 'ack-angular';
 import { DirectoryManager } from 'ack-angular-components/directory-managers/DirectoryManagers';
 import { Actions, Device, ProfileAction } from '../elgato.types';
 import { SessionProvider } from '../session.provider';
-import { firstBackToParentAction, getFoldersInProfileDir, onlyActionsToChildren, ProfileFolderManifestRead, ProfileManifestRead } from '../StreamDeck.class';
+import { getFoldersInProfileDir, onlyActionsToChildren, ProfileFolderManifestRead, ProfileManifestRead, StreamDeck } from '../StreamDeck.class';
+import { getBackButtonsInFolder, SelectFolder } from './folder-action-match.component';
 import { getDeviceViewButtonsByActions } from './page-buttons.component';
 
-interface DeviceView {
+export interface DeviceView {
   device: Device
-  currentProfile: ProfileFolderManifestRead
+  gridLayout: GridLayout
   currentProfileName: string
+  allProfiles: ProfileManifestRead[]
+  currentProfile: ProfileFolderManifestRead
+
+  lockNav: boolean // default true
   viewJson?: boolean
   action?: ProfileAction
-  gridLayout: GridLayout
-  allProfiles: ProfileManifestRead[]
 }
 
 @Component({
@@ -22,17 +25,9 @@ interface DeviceView {
 export class NavigateDevicesComponent {
   devices: Device[] = []
   deviceViews: DeviceView[] = []
-  selectFolder?: {
-    index: number
-    folders: SelectFolder[]
-    action: ProfileAction
-    deviceView: DeviceView
-    gridLayout: GridLayout
-    choice?: SelectFolder
-    saveIntoTitle: boolean
-    saveIntoSettings: boolean
-    viewAll: boolean
-  }
+
+  // modal control to show sub folder select
+  actionNoSubFolder?: { action:ProfileAction, deviceView: DeviceView}
 
   constructor(
     public session: SessionProvider,
@@ -49,127 +44,59 @@ export class NavigateDevicesComponent {
     --this.session.loading
   }
 
-  async addDevice(device: Device) {
-    const currentProfile = await this.session.streamdeck.getProfileHomeDirByDeviceId(device.UUID)
-
-    if ( !currentProfile ) {
-      const err = new Error('Cannot find device home page')
-      throw this.session.error(err.message, err)
-    }
-   
-    const actions = currentProfile.manifest.Controllers[0].Actions
-    const currentProfileName = currentProfile.deviceRead.manifest.Name
-    const deviceView: DeviceView = {
-      device,
-      currentProfile,
-      currentProfileName,
-      gridLayout: getGridLayoutByActions(actions),
-      allProfiles: await this.session.streamdeck.getProfileFoldersByDeviceId(device.UUID)
-    }
-
+  async addDevice(device: Device) {  
+    const deviceView = await getDeviceView(device, this.session.streamdeck)
     this.deviceViews.push(deviceView)
   }
 
   async activateItem(
-    column: ProfileAction,
+    action: ProfileAction,
     deviceView: DeviceView
   ) {
-    switch (column.UUID) {
+    switch (action.UUID) {
       case 'com.elgato.streamdeck.profile.openchild': // 'Create Folder'
-        this.activateChildFolder(column, deviceView)
+        this.activateChildFolder(action, deviceView)
         break
       case 'com.elgato.streamdeck.profile.backtoparent': // 'Parent Folder'
-        this.activateParentFolder(column, deviceView)
+        this.activateBackAction(action, deviceView)
         break
 
       case 'com.elgato.streamdeck.profile.rotate': // 'Switch Profile'
-        this.activateSwitchProfile(column, deviceView)
+        this.activateSwitchProfile(action, deviceView)
         break
     
       default:
-        console.warn(`unable to activate action of type ${column.Name}`)
+        console.warn(`unable to activate action of type ${action.Name}`)
     }
   }
-  
-  async saveChildAssociation() {
-    if ( !this.selectFolder?.choice ) {
-      throw new Error('this.selectFolder.choice not set')
-    }
 
-    const back = this.selectFolder.choice.back
-    const states = back.States
-    const state = states[0] = states[0] || {}
-    const profileId = this.selectFolder.action.Settings.ProfileUUID
-
-    if ( this.selectFolder.saveIntoSettings ) {
-      back.Settings.ProfileUUID = profileId
-    }
-
-    if ( this.selectFolder.saveIntoTitle ) {
-      state.ShowTitle = state.ShowTitle == undefined ? false : state.ShowTitle
-      state.Title = (state.Title || '') + '\n\n\n\n\n\n' + profileId
-    }
-    
-    const saveFolder = this.selectFolder.choice.folder
-    const toSave = saveFolder.manifest
-    const toSaveString = JSON.stringify(toSave, null, 2)
-    ++this.session.loading
-    await saveFolder.manifestFile.write(toSaveString)
-    --this.session.loading
-    const deviceView = this.selectFolder.deviceView
-    deviceView.currentProfile = {
-      ...this.selectFolder.choice.folder,
-      deviceRead: deviceView.currentProfile.deviceRead
-    }
-    delete this.selectFolder
-  }
-
-  async activateParentFolder(
+  async activateBackAction(
     action: ProfileAction,
     deviceView: DeviceView,
   ) {
-    const deviceRead = deviceView.currentProfile.deviceRead
-    const profileFolders = await getFoldersInProfileDir(deviceRead, deviceView.currentProfile.dir.path)
-
-    const toKidButtons = profileFolders.map(folder => ({
-      folder,
-      toKidButtons: onlyActionsToChildren(folder.manifest.Controllers[0].Actions),
-    })).filter(x => x)
-
-    const lookForId = action.Settings.ProfileUUID
-
-    if ( !lookForId ) {
-      throw new Error('app not yet support selecting parent...')
+    const parentProfile = await getParentByBackAction(action, deviceView.currentProfile)
+    if ( parentProfile ) {
+      deviceView.currentProfile = {
+        ...parentProfile.folder,
+        profile: deviceView.currentProfile.profile
+      }
     }
-
-    toKidButtons.forEach(toKid => {
-      toKid.toKidButtons.forEach(toKidButton => {
-
-        if ( toKidButton.Settings.ProfileUUID === lookForId ) {
-          deviceView.currentProfile = { ...toKid.folder, deviceRead }
-        }
-      })
-    })
   }
   
   async activateChildFolder(
     action: ProfileAction,
     deviceView: DeviceView,
-    { viewAll=false, moveOtherViews = true, askUserForMatch = true } = {}
+    { moveOtherViews = true, askUserForMatch = true } = {}
   ) {
-    const related = await getChildByAction(action, deviceView.currentProfile)
+    const related = await activateChildFolderByAction(action, deviceView)
 
     if ( related ) {
-      // ✅ we can navigate to the child
-      // make a note of current parents before changing them
-      const parentActions = deviceView.currentProfile.manifest.Controllers[0].Actions
-      const parentDir = deviceView.currentProfile.dir
-
-      // redraw buttons
-      const deviceRead = deviceView.currentProfile.deviceRead
-      deviceView.currentProfile = { ...related.folder, deviceRead }
-      
       if ( moveOtherViews ) {
+        // ✅ we can navigate to the child
+        // make a note of current parents before changing them
+        const parentActions = deviceView.currentProfile.manifest.Controllers[0].Actions
+        const parentDir = deviceView.currentProfile.dir
+
         this.moveOtherViewsByAction(action, parentActions, deviceView, parentDir)
       }
 
@@ -180,47 +107,8 @@ export class NavigateDevicesComponent {
       return // do not continue onto asking user for help
     }
 
-    const deviceRead = deviceView.currentProfile.deviceRead
-    const profileFolders = await getFoldersInProfileDir(deviceRead, deviceView.currentProfile.dir.path)
-    let backButtons = getBackButtonsInFolder(profileFolders)
-
-    // We have to ask the user for some help
-    const gridLayout: GridLayout = backButtons.reduce((all, buttons) => {
-      const control = buttons.folder.manifest.Controllers[0]
-      const gridLayout = getGridLayoutByActions(control.Actions)
-      all.columns = all.columns > gridLayout.columns ? all.columns : gridLayout.columns
-      all.rows = all.rows > gridLayout.rows ? all.rows : gridLayout.rows
-      return all
-    }, {rows: 0, columns: 0})
-
-    // determine if parent or child has greater counts
-    gridLayout.columns = gridLayout.columns > deviceView.gridLayout.columns ? gridLayout.columns : deviceView.gridLayout.columns
-    gridLayout.rows = gridLayout.rows > deviceView.gridLayout.rows ? gridLayout.rows : deviceView.gridLayout.rows
-
-    // reset our parent counts just incase
-    deviceView.gridLayout.columns = gridLayout.columns
-    deviceView.gridLayout.rows = gridLayout.rows 
-
-    if ( !viewAll ) {
-      // remove ones that already have a child assignment
-      backButtons = backButtons.filter(x => !x.back?.Settings.ProfileUUID)
-    }
-
-    this.selectFolder = {
-      index: 0,
-      gridLayout,
-      deviceView,
-      viewAll,
-      folders: backButtons,
-      saveIntoTitle: false,
-      saveIntoSettings: true,
-      action
-    }
-
-
-    // only one options to choose from
-    if ( backButtons.length === 1 ) {
-      this.selectFolder.choice = backButtons[0]
+    this.actionNoSubFolder = {
+      action, deviceView
     }
   }
 
@@ -229,7 +117,6 @@ export class NavigateDevicesComponent {
     deviceView: DeviceView
   ) {
     const otherViews = this.deviceViews.filter(x => x != deviceView)
-
 
     otherViews.forEach(view => {
       view.allProfiles.forEach(async otherProfile => {
@@ -262,6 +149,10 @@ export class NavigateDevicesComponent {
     const actionKey = matchingParentAction[0]
     const otherViews = this.deviceViews.filter(x => x != deviceView)
     otherViews.forEach(async otherView => {
+      if ( !otherView.lockNav ) {
+        return
+      }
+
       const otherActions = otherView.currentProfile.manifest.Controllers[0].Actions
       const otherAction = otherActions[actionKey]
       const matched = actionsMatch(action, parentDir, otherAction, otherView.currentProfile.dir)
@@ -272,7 +163,7 @@ export class NavigateDevicesComponent {
       switch (action.Name) {
         case 'Create Folder':
           this.activateChildFolder(otherAction, otherView, {
-            viewAll: false,
+            // viewAll: false,
             moveOtherViews: false,
             askUserForMatch: false
           })    
@@ -310,11 +201,11 @@ export class NavigateDevicesComponent {
     moveOtherViews: boolean
   ) {
     deviceView.currentProfile = profile
-    const currentProfileName = deviceView.currentProfile.deviceRead.manifest.Name
+    const currentProfileName = deviceView.currentProfile.profile.manifest.Name
     deviceView.currentProfileName = currentProfileName
     
     if ( moveOtherViews ) {
-      const parentProfile = deviceView.currentProfile.deviceRead
+      const parentProfile = deviceView.currentProfile.profile
       //const parentActions = parentProfile.manifest.Controllers[0].Actions
       const parentDir = parentProfile.dir
       const profile = await this.session.streamdeck.getProfileHomeByDirName(parentDir.name)
@@ -322,7 +213,7 @@ export class NavigateDevicesComponent {
         return
       }
       
-      this.moveOtherViewsByProfile(deviceView.currentProfile.deviceRead, deviceView)
+      this.moveOtherViewsByProfile(deviceView.currentProfile.profile, deviceView)
     }
   }
 
@@ -349,33 +240,35 @@ export class NavigateDevicesComponent {
       return
     }
 
-    const profile = deviceView.currentProfile
-    const control = profile.manifest.Controllers[0]
-    const actions = control.Actions
-
-    const entries = Object.entries(actions)
-    const index = entries.findIndex(a => a[1] === deviceView.action)
-
-    if ( index < 0 ) {
-      console.warn('cannot find to delete')
-      return // cannot find to delete
-    }
-
     if ( !this.prompts.confirm('Confirm delete action') ) {
       return
     }
 
-    const key: string = entries[index][0]
-    delete actions[key]
-    
-    const newManifest = JSON.stringify(profile.manifest, null, 2)
-    await profile.manifestFile.write( newManifest )
+    const profileFolder = deviceView.currentProfile
+    await deleteProfileAction(deviceView.action, profileFolder)
   }
 }
 
-interface SelectFolder {
-  folder: ProfileFolderManifestRead
-  back: ProfileAction
+export async function deleteProfileAction(
+  action: ProfileAction,
+  profileFolder : ProfileFolderManifestRead
+) {
+  const control = profileFolder.manifest.Controllers[0]
+  const actions = control.Actions
+
+  const entries = Object.entries(actions)
+  const index = entries.findIndex(a => a[1] === action)
+
+  if ( index < 0 ) {
+    console.warn('cannot find to delete')
+    return // cannot find to delete
+  }
+
+  const key: string = entries[index][0]
+  delete actions[key]
+  
+  const newManifest = JSON.stringify(profileFolder.manifest, null, 2)
+  await profileFolder.manifestFile.write( newManifest )
 }
 
 export interface GridLayout {
@@ -383,7 +276,7 @@ export interface GridLayout {
   columns: number
 }
 
-function getGridLayoutByActions(actions: Actions): GridLayout {
+export function getGridLayoutByActions(actions: Actions): GridLayout {
   const buttonMap = getDeviceViewButtonsByActions(actions)
   const maxColumnCount = buttonMap.reduce((all,row) => row.length > all ? row.length : all, 0)
   return {columns: maxColumnCount, rows: buttonMap.length}
@@ -434,20 +327,11 @@ async function actionsMatch(
   return true
 }
 
-function getBackButtonsInFolder(
-  profileFolders: ProfileFolderManifestRead[]
-): SelectFolder[] {
-  return profileFolders.map(folder => ({
-    folder,
-    back: firstBackToParentAction(folder.manifest.Controllers[0].Actions),
-  })) as SelectFolder[]
-}
-
 export async function getChildByAction(
   action: ProfileAction,
   profile: ProfileFolderManifestRead,
 ): Promise<SelectFolder | undefined> {
-  const deviceRead = profile.deviceRead
+  const deviceRead = profile.profile
   const profileFolders = await getFoldersInProfileDir(deviceRead, profile.dir.path)
   return getChildByActionInFolders(action, profileFolders)
 }
@@ -467,4 +351,95 @@ export function getChildByActionInFolders(
 
   const related = backButtons[ relatedBack ]
   return related
+}
+
+export async function getDeviceView(
+  device: Device,
+  streamdeck: StreamDeck,
+  { profile }: { profile?: ProfileFolderManifestRead } = {}
+): Promise<DeviceView> {
+  profile = profile || await streamdeck.getProfileHomeDirByDeviceId(device.UUID)
+
+  if ( !profile ) {
+    const err = new Error('Cannot find device home page')
+    throw err
+  }
+
+  const actions = profile.manifest.Controllers[0].Actions
+  const currentProfileName = profile.profile.manifest.Name
+  const deviceView: DeviceView = {
+    device, lockNav: true,
+    currentProfile: profile,
+    currentProfileName,
+    gridLayout: getGridLayoutByActions(actions),
+    allProfiles: await streamdeck.getProfileFoldersByDeviceId(device.UUID)
+  }
+  return deviceView
+}
+
+export async function activateChildFolderByAction(
+  action: ProfileAction,
+  deviceView: DeviceView,
+) {
+  const related = await getChildByAction(action, deviceView.currentProfile)
+  if ( !related ) {
+    return
+  }
+
+  // redraw buttons
+  const profile = deviceView.currentProfile.profile
+  deviceView.currentProfile = { ...related.folder, profile }
+  return related
+}
+
+async function getActionsToKidsByProfileFolderRead(
+  read: ProfileFolderManifestRead
+) {
+  const profile = read.profile
+  const profileFolders = await getFoldersInProfileDir(profile, read.dir.path)
+
+  const toKidButtons = profileFolders.map(folder => ({
+    folder,
+    toKidButtons: onlyActionsToChildren(folder.manifest.Controllers[0].Actions),
+  })).filter(x => x)
+
+  return toKidButtons
+}
+
+function findParentProfileByActionUUID(
+  toKidButtons: {
+    folder: ProfileFolderManifestRead;
+    toKidButtons: ProfileAction[];
+  }[],
+  lookForId: string
+): {
+    folder: ProfileFolderManifestRead
+    toKidButtons: ProfileAction[]
+  } | undefined {
+  for (let index = toKidButtons.length - 1; index >= 0; --index) {
+    const toKid = toKidButtons[index]
+    for (let index = toKid.toKidButtons.length - 1; index >= 0; --index) {
+      const toKidButton = toKid.toKidButtons[index]
+      if ( toKidButton.Settings.ProfileUUID === lookForId ) {
+        return toKid
+      }
+    }
+  }
+
+  return
+}
+
+export async function getParentByBackAction(
+  action: ProfileAction,
+  profileFolder: ProfileFolderManifestRead
+) {
+  const toKidButtons = await getActionsToKidsByProfileFolderRead(profileFolder)
+
+  const lookForId = action.Settings.ProfileUUID
+
+  if ( !lookForId ) {
+    throw new Error('app not yet support selecting parent...')
+  }
+
+  return findParentProfileByActionUUID(toKidButtons, lookForId)
 }

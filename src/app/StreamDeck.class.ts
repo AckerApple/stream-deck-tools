@@ -1,4 +1,5 @@
 import { DirectoryManager, DmFileReader } from "ack-angular-components/directory-managers/DirectoryManagers"
+import { MissingFolderAction } from "./compare/compare-devices.component"
 import { Actions, Device, DeviceProfile, ProfileAction, ProfileFolderManifest } from "./elgato.types"
 import { SessionProvider } from "./session.provider"
 
@@ -6,7 +7,7 @@ export interface ProfileFolderManifestRead {
   manifestFile: DmFileReader
   dir: DirectoryManager
   manifest: ProfileFolderManifest
-  deviceRead: ProfileManifestRead
+  profile: ProfileManifestRead
 }
 
 export class StreamDeck {
@@ -61,7 +62,7 @@ export class StreamDeck {
 
       const result: ProfileFolderManifestRead = {
         ...dirRead,
-        deviceRead: read,
+        profile: read,
       }
       return result
     })
@@ -165,8 +166,8 @@ export interface ProfileManifestRead {
   manifest: DeviceProfile
   manifestFile: DmFileReader
   dir: DirectoryManager
+  missingFolderActions: MissingFolderAction[]
 }
-
 
 export async function getProfileHomeDirByDir(
   dir: DirectoryManager,
@@ -206,7 +207,7 @@ export async function getProfileHomeDirByDir(
 
     const result: ProfileFolderManifestRead = {
       manifest: json, manifestFile, dir: folder,
-      deviceRead: profileManifestRead,
+      profile: profileManifestRead,
     }
 
     return result
@@ -225,6 +226,7 @@ async function getProfileManifestReadByFolder(folder: DirectoryManager) {
   const manifest = await manifestFile.readAsJson() as DeviceProfile
   const profileManifestRead: ProfileManifestRead = {
     manifest, manifestFile, dir: folder,
+    missingFolderActions: []
   }
 
   return profileManifestRead
@@ -243,17 +245,17 @@ export function onlyActionsToChildren(actions: Actions) {
 }
 
 export async function getChildFoldersInProfileDir(
-  deviceRead: ProfileManifestRead
-) {
-  const results = await getFoldersInProfileDir(deviceRead)
+  profile: ProfileManifestRead
+): Promise<ProfileFolderManifestRead[]> {
+  const results = await getFoldersInProfileDir(profile)
   return results.filter(x => isProfileFolderManifestChildLike(x.manifest))
 }
 
 export async function getFoldersInProfileDir(
-  deviceRead: ProfileManifestRead,
+  profile: ProfileManifestRead,
   excludePath?: string
 ): Promise<ProfileFolderManifestRead[]> {
-  const dir = deviceRead.dir
+  const dir = profile.dir
   const profilesDir = await dir.getDirectory('Profiles')
   const folders = await profilesDir.getFolders()
   const promises = folders.map(async folder => {
@@ -267,7 +269,7 @@ export async function getFoldersInProfileDir(
       manifestFile,
       dir: folder,
       manifest,
-      deviceRead,
+      profile,
     }
 
     return result

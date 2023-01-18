@@ -1,5 +1,4 @@
-import { EventEmitter, Injectable } from "@angular/core"
-import { DirectoryManager } from "ack-angular-components/directory-managers/DirectoryManagers"
+import { Injectable } from "@angular/core"
 import { getOs, getStorage, saveStorage } from "./app.utilities"
 import { StreamDeck } from "./StreamDeck.class"
 
@@ -30,6 +29,10 @@ export class SessionProvider {
     } catch (err) {
       this.error('could not load previous config', err)
     }
+  }
+
+  info(message: string): void {
+    console.info('🔵 ' + message)
   }
 
   error<Err>(message: string, err?: Err): Err {

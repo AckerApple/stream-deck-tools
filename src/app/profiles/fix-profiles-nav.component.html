@@ -1,4 +1,4 @@
-<select-elgato-session-directory></select-elgato-session-directory>
+<select-elgato-session-directory [streamdeck]="session.streamdeck"></select-elgato-session-directory>
 
 <button *ngIf="session.streamdeck.dir" type="button" class="bg-calm"
   (click)="load()"
@@ -10,7 +10,11 @@
   <button *ngIf="badActions.length" type="button"
     (click)="fixBadActions()"
   >fix bad actions</button>
-        
-  <textarea *ngIf="badActions.length" class="width-full" rows="12" wrap="off"
-  >{{ badActions | json }}</textarea>
+
+  <div *ngFor="let item of badActions" [title]="item.dir.path+'/'+item.action.States[0].Image">
+    <page-button [action]="item.action" [directory]="item.dir"></page-button>
+    <textarea class="width-full" rows="12" wrap="off"
+    >{{ item | json }}</textarea>
+  </div>
+  
 </div>

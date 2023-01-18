@@ -1,42 +1,59 @@
 import { Component } from '@angular/core'
-import { DirectoryManager, DmFileReader } from 'ack-angular-components/directory-managers/DirectoryManagers';
-import { Actions, Device, DeviceProfile, ProfileAction, ProfileFolderManifest } from '../elgato.types';
+import { Prompts } from 'ack-angular';
+import { DirectoryManager } from 'ack-angular-components/directory-managers/DirectoryManagers';
+import { Actions, Device, ProfileAction, ProfileFolderManifest } from '../elgato.types';
 import { SessionProvider } from '../session.provider';
-import { getChildFoldersInProfileDir, getProfileHomeDirByDir, ProfileFolderManifestRead, ProfileManifestRead } from '../StreamDeck.class';
-import { getChildByAction } from './navigate-devices.component';
-
-interface Compare {
-  compareType: 'not-in-from' | 'not-in-with'
-  itemType: 'profile' | 'controlAction'
-
-  // ❌ cannot be solved (we cant generate the folder ids elgato uses)
-  notInProfile?: NotInProfile
-
-  // ✅ can be solved. Existing profiles on both sides, just missing action
-  notInActions?: NotInActions
-}
-
-interface NotInProfile {
-  file: DmFileReader // existing manifest file
-  manifest: DeviceProfile // existing manifest {Name: string}
-}
+import { getProfileHomeDirByDir, ProfileFolderManifestRead, ProfileManifestRead, StreamDeck } from '../StreamDeck.class';
+import { NotInActionsCompare, NotInProfileCompare } from './compare-types';
+import { deleteProfileAction, DeviceView, getChildByAction, getDeviceView } from './navigate-devices.component';
 
 @Component({
   templateUrl: './compare-devices.component.html',
 })
 export class CompareDevicesComponent {
   compared = false
+  
   deviceFrom?: Device
+  fromProfiles: ProfileManifestRead[] = []
+  
   deviceWith?: Device
+  withProfiles: ProfileManifestRead[] = []
+  
   devices: Device[] = []
+  
   // comparison: Compare[] = []
   notFoundProfiles: NotInProfileCompare[] = []
   notFoundActions: NotInActionsCompare[] = []
 
-  constructor(public session: SessionProvider) {
+  showOtherStreamDeck = false
+  otherDevices: Device[] = []
+  otherStreamDeck: StreamDeck
+
+  // modal control to show sub folder select
+  actionNoSubFolder?: {
+    action: ProfileAction
+    deviceView: DeviceView
+    missingFolderAction: MissingFolderAction
+    missingFolderActions: MissingFolderAction[]
+  }
+
+  constructor(
+    public session: SessionProvider,
+    public prompts: Prompts,
+  ) {
     if ( session.streamdeck.dir ) {
       this.setDirectory(session.streamdeck.dir)
     }
+
+    this.otherStreamDeck = new StreamDeck(session)
+  }
+
+  async setOtherDirectory(dir: DirectoryManager) {
+    this.otherStreamDeck.dir = dir
+    this.compared = false
+    ++this.session.loading
+    this.otherDevices = await this.otherStreamDeck.fetchDevices()
+    --this.session.loading
   }
 
   async setDirectory(dir: DirectoryManager) {
@@ -62,11 +79,15 @@ export class CompareDevicesComponent {
 
     this.notFoundProfiles.length = 0
 
-    const fromProfiles = await this.session.streamdeck.getProfileFoldersByDeviceId(this.deviceFrom.UUID)
-    const withProfiles = await this.session.streamdeck.getProfileFoldersByDeviceId(this.deviceWith.UUID)
+    ++this.session.loading
+    this.fromProfiles = await this.session.streamdeck.getProfileFoldersByDeviceId(this.deviceFrom.UUID)
+    
+    const otherDeck = this.showOtherStreamDeck ? this.otherStreamDeck : this.session.streamdeck
+    this.withProfiles = await otherDeck.getProfileFoldersByDeviceId(this.deviceWith.UUID)
 
-    this.notFoundProfiles = this.findMissingProfiles(fromProfiles, withProfiles)
-    this.notFoundActions = await this.findMissingActions(fromProfiles, withProfiles)
+    this.notFoundProfiles = this.findMissingProfiles(this.fromProfiles, this.withProfiles)
+    this.notFoundActions = await this.findMissingActions(this.fromProfiles, this.withProfiles)
+    --this.session.loading
     this.compared = true
   }
 
@@ -96,21 +117,27 @@ export class CompareDevicesComponent {
     compareType: 'not-in-from' | 'not-in-with'
   ): Promise<NotInActionsCompare[]> {
     const promises = fromProfiles.map(async fromProfile => {
-      const foundProfile = findProfileNameMatch(fromProfile, withProfiles)
+      const withProfile = findProfileNameMatch(fromProfile, withProfiles)
 
-      if ( !foundProfile ) {
+      if ( !withProfile ) {
         return // its not even a found profile, skip
       }
 
       const fromProfileHomeDir = await getProfileHomeDirByDir(fromProfile.manifestFile.directory, fromProfile)
-      const foundProfileHomeDir = await getProfileHomeDirByDir(foundProfile.manifestFile.directory, foundProfile)
+      const foundProfileHomeDir = await getProfileHomeDirByDir(withProfile.manifestFile.directory, withProfile)
 
       if ( !fromProfileHomeDir || !foundProfileHomeDir ) {
         console.warn('cannot find home page for fromProfileHomeDir and/or foundProfileHomeDir')
         return
       }
 
-      const results = await compareProfileFolders(fromProfileHomeDir, foundProfileHomeDir, fromProfile, compareType)
+      const results = await compareProfileFolders(
+        fromProfileHomeDir,
+        foundProfileHomeDir,
+        // fromProfile, // aka profileParent
+        compareType,
+        { fromProfile, withProfile }
+      )
       
       return results
     })
@@ -161,40 +188,90 @@ export class CompareDevicesComponent {
     const placeInActions = manifest.Controllers[0].Actions
     compare.notInActions.actions
     placeInActions[ key ] = action
+    
+    // write new json file
     const newManifest = JSON.stringify(manifest, null, 2)
     await compare.notInActions.notInFile.write(newManifest)
     delete compare.notInActions.actions[key]
+
+    // copy image
+    const imagePath = action.States[0].Image
+    const imagePathSplit = imagePath.split('/')
+    const imageFolder = imagePathSplit[0]
+    const imageFileName = imagePathSplit[1]
+    const imgDir = await compare.notInActions.inProfileDir.getDirectory(imageFolder)
+    const file = await imgDir.file(imageFileName)
+    const base64 = await file.readAsDataURL()
+    const blob = dataURItoBlob(base64)
+    
+    const notInFile = compare.notInActions.notInFile
+    const writeDir = await notInFile.directory.getDirectory(imageFolder)
+    const writeFile = await writeDir.file(imageFileName, { create: true })
+    await writeFile.write(blob as any)
+    
+    this.session.info(`Successfully saved ${notInFile.name}`)
+  }
+
+  async showSubFolderSelect(
+    profile: ProfileManifestRead,
+    missing: MissingFolderAction,
+    device: Device,
+    streamdeck: StreamDeck,
+    missingFolderActions: MissingFolderAction[]
+  ) {
+    const pfmr: ProfileFolderManifestRead = {
+      manifestFile: profile.manifestFile,
+      dir: profile.dir,
+      manifest: missing.profileFolder,
+      profile,
+    }
+
+    this.actionNoSubFolder = {
+      action: missing.action,
+      deviceView: await getDeviceView(device, streamdeck, { profile: pfmr }),
+      missingFolderAction: missing,
+      missingFolderActions,
+    }
+  }
+
+  noActionSuccess() {
+    console.log(0)
+    if ( !this.actionNoSubFolder ) {
+      return
+    }
+    
+    const matchWith = this.actionNoSubFolder.missingFolderAction
+    removeMissingAction(matchWith, this.actionNoSubFolder.missingFolderActions)
+  }
+
+  async deleteMissingAction(
+    missing: MissingFolderAction,
+    missingFrom: MissingFolderAction[]
+  ) {
+    if ( !this.prompts.confirm('Confirm delete action') ) {
+      return
+    }
+
+    await deleteProfileAction(missing.action, missing.profileFolderRead)
+    removeMissingAction(missing, missingFrom)
   }
 }
 
-interface NotInProfileCompare extends Compare {
-  itemType: 'profile'
-  notInProfile: NotInProfile
-}
-
-interface NotInActions {
-  notInFile: DmFileReader // manifest file missing control.action
-  manifest: ProfileFolderManifest // manifest missing control.action
-
-  actions: Actions
-  inProfileDir: DirectoryManager // the directory we are coming FROM so we can grab images
-  
-  // missing in profile parent details
-  profileParent: ProfileManifestRead
-}
-
-interface NotInActionsCompare extends Compare {
-  itemType: 'controlAction'
-  notInActions: NotInActions
+function removeMissingAction(
+  matchWith: MissingFolderAction,
+  missingFolderActions: MissingFolderAction[],
+) {
+  const index = missingFolderActions.findIndex(x => x === matchWith)
+  missingFolderActions.splice(index, 1)
 }
 
 function findProfileNameMatch(
   fromProfile: ProfileManifestRead,
   withProfiles: ProfileManifestRead[]
 ) {
-  return withProfiles.find(withProfile => {
-    return withProfile.manifest.Name === fromProfile.manifest.Name
-  })
+  return withProfiles.find(withProfile =>
+    withProfile.manifest.Name === fromProfile.manifest.Name
+  )
 }
 
 async function compareProfileActionForKids(
@@ -202,30 +279,49 @@ async function compareProfileActionForKids(
   fromFolder: ProfileFolderManifestRead,
   withAction: ProfileAction,
   withFolder: ProfileFolderManifestRead,
-  profileParent: ProfileManifestRead,
-  compareType: 'not-in-from' | 'not-in-with'
+  compareType: 'not-in-from' | 'not-in-with',
+  {fromProfile, withProfile}: {
+    fromProfile: ProfileManifestRead
+    withProfile: ProfileManifestRead
+  },
 ): Promise<NotInActionsCompare[]> {
   if ( fromAction.UUID !== 'com.elgato.streamdeck.profile.openchild' ) {
-    return [] // not interested
+    return [] // not interested, we only want folders
   }
   
   const fromChild = await getChildByAction(fromAction, fromFolder)
   if ( !fromChild ) {
+    fromProfile.missingFolderActions.push({
+      action: fromAction,
+      dir: fromFolder.dir,
+      profileFolder: fromFolder.manifest,
+      profileFolderRead: fromFolder,
+    })
+    console.warn('🟠 Cannot find the from child folder by action', fromAction.States[0].Title, fromAction)
     // TODO: find a way to notate that
     return [] // cannot find child so we can't continue
   }
   
   const withChild = await getChildByAction(withAction, withFolder)
   if ( !withChild ) {
+    withFolder.profile.missingFolderActions.push({
+      action: withAction,
+      dir: withFolder.dir,
+      profileFolder: withFolder.manifest,
+      profileFolderRead: withFolder
+    })
+
+    console.warn('🟠 Cannot find the with child folder by action', withAction.States[0].Title, withAction)
     // TODO: find a way to notate that
     return []// cannot find child so we can't continue
   }
 
+  // find missing actions between two folders
   const results = await compareProfileFolders(
     fromChild.folder,
     withChild.folder, 
-    profileParent,
-    compareType
+    compareType,
+    { fromProfile , withProfile }, // aka profileParent
   )
 
   return results
@@ -234,8 +330,11 @@ async function compareProfileActionForKids(
 async function compareProfileFolders(
   fromFolder: ProfileFolderManifestRead,
   withFolder: ProfileFolderManifestRead,
-  profileParent: ProfileManifestRead,
-  compareType: 'not-in-from' | 'not-in-with'
+  compareType: 'not-in-from' | 'not-in-with',
+  { fromProfile, withProfile }: {
+    fromProfile: ProfileManifestRead
+    withProfile: ProfileManifestRead
+  },
 ): Promise<NotInActionsCompare[]> {
   const results: NotInActionsCompare[] = []
   const fromActions = fromFolder.manifest.Controllers[0].Actions
@@ -249,8 +348,8 @@ async function compareProfileFolders(
         fromFolder,
         withAction,
         withFolder,
-        profileParent,
-        compareType
+        compareType,
+        {withProfile, fromProfile},
       )
       results.push(...kidResults)
       return // the action was found, skip it
@@ -275,7 +374,7 @@ async function compareProfileFolders(
       inProfileDir: fromFolder.dir, // the directory we are coming FROM so we can grab images
       
       // missing in profile parent details
-      profileParent, 
+      profileParent: fromProfile, 
     }
   }
 
@@ -285,4 +384,23 @@ async function compareProfileFolders(
   }
 
   return results
+}
+
+function dataURItoBlob(dataURI: string) {
+  const byteString = atob(dataURI.split(',')[1]);
+  const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0]
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  const blob = new Blob([ab], {type: mimeString});
+  return blob;
+}
+
+export interface MissingFolderAction {
+  profileFolder: ProfileFolderManifest
+  profileFolderRead: ProfileFolderManifestRead
+  action: ProfileAction
+  dir: DirectoryManager
 }

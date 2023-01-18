@@ -1,6 +1,6 @@
 {
   "name": "stream-deck-tools",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "scripts": {
     "ng": "ng",
     "clear:cache": "rm -rf .angular/cache",
@@ -39,9 +39,9 @@
     "@angular/compiler-cli": "^14.2.0",
     "@types/jasmine": "~4.0.0",
     "@types/wicg-file-system-access": "^2020.9.5",
-    "ack-angular": "^4.1.2",
+    "ack-angular": "^4.1.7",
     "ack-angular-components": "github:ackerapple/ack-angular-components#main",
-    "ack-css-boot": "^3.0.10",
+    "ack-css-boot": "^3.0.11",
     "jasmine-core": "~4.3.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.1.0",

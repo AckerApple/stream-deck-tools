@@ -1,4 +1,13 @@
-<select-elgato-session-directory (change)="setDirectory($event)"></select-elgato-session-directory>
+<select-elgato-session-directory [streamdeck]="session.streamdeck" (change)="setDirectory($event)"></select-elgato-session-directory>
+<div class="text-right">
+  <a (click)="showOtherStreamDeck = !showOtherStreamDeck" class="underline">select another directory to compare</a>
+</div>
+
+<div *ngIf="showOtherStreamDeck">
+  <select-elgato-session-directory [streamdeck]="otherStreamDeck" label="otherStreamDeck"
+    (change)="setOtherDirectory($event)"
+  ></select-elgato-session-directory>
+</div>
 
 <div class="pad-v" *ngIf="session.streamdeck.dir && !devices.length">
   No devices found. No profile folders with manifest.json file with "Device" were found.
@@ -20,7 +29,14 @@
 
     <div class="flex1">
       <div>Compare <b>with</b></div>
-      <select (change)="setDeviceWith($any($event.target).value)" class="width-full">
+      <select *ngIf="showOtherStreamDeck" (change)="setDeviceWith($any($event.target).value)" class="width-full">
+        <option value=""></option>
+        <ng-container *ngFor="let item of otherDevices">
+          <option [value]="item.UUID">{{item.Model}} - {{item.UUID}}</option>
+        </ng-container>
+      </select>
+
+      <select *ngIf="!showOtherStreamDeck" (change)="setDeviceWith($any($event.target).value)" class="width-full">
         <option value=""></option>
         <ng-container *ngFor="let item of devices">
           <ng-container *ngIf="deviceFrom?.UUID != item.UUID">
@@ -32,8 +48,10 @@
 
     <div *ngIf="deviceFrom && deviceWith && deviceFrom.UUID != deviceWith.UUID" class="flex1">
       <div>&nbsp;</div>
-      <button type="button" class="width-full bg-positive"
+      <button type="button" class="width-full "
         (click)="compare()"
+        [disabled]="session.loading"
+        [ngClass]="session.loading ? 'bg-dark opacity-80' : 'bg-positive'"
       >COMPARE</button>
     </div>
   </div>
@@ -50,29 +68,68 @@
         {{ item.notInProfile.manifest.Name }} - {{ item.compareType }}
       </li>
     </ul>
+    <br />
   </div>
 
   <!-- missing actions -->
   <div class="pad-v" *ngIf="notFoundActions.length; else allActionFound">
     <!-- code find hint: profiles not found. profile not found-->
-    <h3>{{ notFoundActions.length }} Actions{{ notFoundActions.length > 1 ? 's' : ''}} not found</h3>
-    <p class="text-warning">This cannot be fixed using this app</p>
+    <h3>{{ notFoundActions.length }} Action{{ notFoundActions.length > 1 ? 's' : ''}} not found</h3>
     <div class="flex-wrap">
       <ng-container *ngFor="let item of notFoundActions">
         <div *ngFor="let ak of item.notInActions.actions | keyvalue" class="flex-stacked flex-center">
           <page-button [action]="ak.value" [directory]="item.notInActions.inProfileDir"></page-button>
           <div>
-            {{ item.notInActions.profileParent.manifest.Name }} - {{ ak.value.Name }} <sup>({{item.compareType}})</sup>
-            <!--{{ ak.value.UUID }}-->
-          </div>
-          <div>
-            <button class="bg-calm" (click)="fixNotFoundAction(ak.key, ak.value, item)">🔧 fix</button>                  
+            <div>
+              {{ item.notInActions.profileParent.manifest.Name }} - {{ ak.value.Name }}
+              <!--{{ ak.value.UUID }}-->
+            </div>
+            <div class="text-center text-xxs">
+              <div class="flex-stacked">
+                <strong>missing in folder</strong>
+                {{item.notInActions.notInFile.directory.path}}
+              </div>
+              <div>{{item.compareType}}</div>
+            </div>
+            <div *ngIf="ak.value.UUID !== 'com.elgato.streamdeck.profile.openchild' && ak.value.Name !== 'Create Folder'; else cannotFix">
+              <button class="bg-calm" (click)="fixNotFoundAction(ak.key, ak.value, item)">🔧 fix</button>                  
+            </div>
+            <ng-template #cannotFix>
+              <div class="text-danger">cannot fix missing folders. Use StreamDeck app to copy/paste missing item</div>
+            </ng-template>
           </div>
         </div>
       </ng-container>
     </div>
   </div>
+
+  <h3>From Profiles</h3>
+  <div *ngIf="deviceFrom">
+    <ng-container *ngTemplateOutlet="profileBreakdown;context:{profiles:fromProfiles, device: deviceFrom}"></ng-container>
+  </div>
+
+  <br />
+  <h3>With Profiles</h3>
+  <div *ngIf="deviceFrom">
+    <ng-container *ngTemplateOutlet="profileBreakdown;context:{profiles:withProfiles, device: deviceWith}"></ng-container>
+  </div>
 </ng-container>
+
+<ng-template #profileBreakdown let-profiles="profiles" let-device="device">
+  <div *ngFor="let profile of profiles">
+    {{ profile.manifest.Name }}
+    <div *ngIf="profile.missingFolderActions.length">
+      Some child folders need to be mapped
+    </div>
+    <ul *ngFor="let missing of profile.missingFolderActions">
+      <li (click)="showSubFolderSelect(profile, missing, device, session.streamdeck, profile.missingFolderActions)">
+        <page-button [directory]="missing.dir" [action]="missing.action"></page-button>
+        <span class="text-xxxs opacity-60 text-center">{{ missing.action.Name }}</span>
+        <span class="text-xxxs opacity-60 text-center" (click)="deleteMissingAction(missing, profile.missingFolderActions)">🗑</span>
+      </li>
+    </ul>
+  </div>
+</ng-template>
 
 <ng-template #allProfilesFound>
   <h3>✅ All Profiles Found</h3>
@@ -81,3 +138,14 @@
 <ng-template #allActionFound>
   <h3>✅ All Actions Found</h3>
 </ng-template>
+
+
+<!-- help select child modal -->
+<ack-modal *ngIf="actionNoSubFolder" (close)="actionNoSubFolder=undefined">
+  <div class="bg-dark pad">
+    <folder-action-match [action]="actionNoSubFolder.action" [deviceView]="actionNoSubFolder.deviceView"
+      (success)="noActionSuccess()"
+      (done)="actionNoSubFolder=undefined"
+    ></folder-action-match>
+  </div>
+</ack-modal>

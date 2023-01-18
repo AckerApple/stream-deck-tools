@@ -5,11 +5,13 @@ import { SessionProvider } from '../session.provider'
 import { manifestFolderOnly } from '../StreamDeck.class'
 
 interface BadAction {
-  fixProfile: string // where is should point to
   profile: ProfileFolderManifest
-  file: DmFileReader // The file with the bad switch
-  device: Device // The device with the bad switch
   action: ProfileAction // The bad instructions
+  device: Device // The device with the bad switch
+  file: DmFileReader // The file with the bad switch
+  dir: DirectoryManager // The file with the bad switch
+  
+  fixProfile: string // where is should point to
   targetProfileName: string // What is attempting to be referenced
   badTargetUuid: string // what illegal target are we pointing at
   badProfileUuid: string // The owner of the bad action
@@ -95,8 +97,8 @@ export class FixProfilesNavComponent {
     const controlActions = profile.Controllers[0].Actions
     const actions: ProfileAction[] = Object.values(controlActions)
 
-    const meta = {
-      profile,
+    const meta: InspectActionMeta = {
+      profile, dir,
       profileManifest,
       device: profileManifest.Device,
       profilesV2,
@@ -136,7 +138,7 @@ export class FixProfilesNavComponent {
   async inspectAction(
     action: ProfileAction,
     {
-      device, manifest, rootAction,
+      device, manifest, rootAction, dir,
       profilesV2, profileManifest, profileFolder, profile
     }: InspectActionMeta
   ): Promise<BadAction | undefined> {
@@ -148,10 +150,10 @@ export class FixProfilesNavComponent {
     const model = device.Model
     const uuid = device.UUID
     const targetProfile = action.Settings.ProfileUUID // where it points to
-    const targetManifestFile = await this.getManifestFileByProfileUuid(targetProfile, profilesV2)
+    const targetManifestFile = await getManifestFileByProfileUuid(targetProfile, profilesV2)
 
     const badActionPrep = {
-      action, file: manifest, device, profile,
+      action, file: manifest, device, profile, dir,
       badTargetUuid: targetProfile,
       badProfileUuid: profileFolder.path.split('/').pop()?.split('.').shift() as string,
       badProfileName: profileManifest.Name,
@@ -211,21 +213,6 @@ export class FixProfilesNavComponent {
     }
 
     return badAction
-  }
-
-  async getManifestFileByProfileUuid(
-    targetProfile: string,
-    profilesV2: DirectoryManager
-  ): Promise<DmFileReader | undefined> {
-    const dirName = targetProfile + '.sdProfile'
-    try {
-      const targetProfileFolder = await profilesV2.getDirectory(dirName)
-      const manifest = await targetProfileFolder.findFileByPath('manifest.json')
-      return manifest
-    } catch(err) {
-      console.warn(`could not read dir ${dirName}`, err)
-      return
-    }
   }
 
   /** Looks for a correcting profile uuid for a switch action
@@ -322,7 +309,7 @@ export class FixProfilesNavComponent {
       return
     }
 
-    const targetManifestFile = await this.getManifestFileByProfileUuid(uuid, profilesV2)
+    const targetManifestFile = await getManifestFileByProfileUuid(uuid, profilesV2)
     
     if ( !targetManifestFile ) {
       console.warn(`could not load a Switch Profile ${uuid}`)
@@ -356,7 +343,7 @@ export class FixProfilesNavComponent {
   ): Promise<string | undefined> {
     // 1.
     const uuid = action.Settings.ProfileUUID
-    const targetManifestFile = await this.getManifestFileByProfileUuid(uuid, profilesV2)
+    const targetManifestFile = await getManifestFileByProfileUuid(uuid, profilesV2)
     
     if ( !targetManifestFile ) {
       console.warn('cannot load target manifest')
@@ -422,6 +409,7 @@ async function awaitFind<T, G>(
 }
 
 interface InspectActionMeta {
+  dir: DirectoryManager
   profile: ProfileFolderManifest
   device: Device
   profileManifest: DeviceProfile
@@ -436,4 +424,20 @@ interface ImageHuntMeta {
   states: State[]
   profilesV2: DirectoryManager
   device: Device
+}
+
+
+export async function getManifestFileByProfileUuid(
+  targetProfile: string,
+  profilesV2: DirectoryManager
+): Promise<DmFileReader | undefined> {
+  const dirName = targetProfile + '.sdProfile'
+  try {
+    const targetProfileFolder = await profilesV2.getDirectory(dirName)
+    const manifest = await targetProfileFolder.findFileByPath('manifest.json')
+    return manifest
+  } catch(err) {
+    console.warn(`could not read dir ${dirName}`, err)
+    return
+  }
 }

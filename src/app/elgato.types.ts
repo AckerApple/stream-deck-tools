@@ -1,6 +1,6 @@
 export interface Device {
-  Model:string
-  UUID:string
+  Model: string
+  UUID: string
 }
 
 export interface DeviceProfile {

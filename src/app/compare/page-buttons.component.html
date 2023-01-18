@@ -1,7 +1,7 @@
 <table cellspacing="15" border="0">
   <tr *ngFor="let row of buttons; let rowIndex = index">
     <td class="pad-xxs cursor-pointer" *ngFor="let column of row; let index=index"
-      [title]="rowIndex + '-' + index"
+      [title]="index + ',' + rowIndex"
       (click)="buttonClick.emit(column)"
       (dblclick)="buttonDblClick.emit(column)"
     >

@@ -13,6 +13,7 @@ import { NavigateDevicesComponent } from './compare/navigate-devices.component'
 import pipes from './app.pipes'
 import { PageButtonsComponent } from './compare/page-buttons.component'
 import { PageButtonComponent } from './compare/page-button.component'
+import { FolderActionMatchComponent } from './compare/folder-action-match.component'
 
 export const declarations = [
   AppComponent,
@@ -25,6 +26,7 @@ export const declarations = [
   
   NavigateDevicesComponent,
   FixProfilesNavComponent,
+  FolderActionMatchComponent,
   CompareDevicesComponent,
   MenuStackListComponent,
   ExitComponent,

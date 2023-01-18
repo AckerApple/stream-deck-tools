@@ -1,0 +1,61 @@
+<h3>👇 Select and save which child page</h3>
+<p>ℹ️ This app does not have enough access/ability to read your StreamDeck private cache. However select this page once and we can 💾 save this association for next time.</p>
+
+<div *ngIf="selectFolder" class="flex-center flex-valign-center overflow">
+  <div class="pad bg-grey radius-5">
+    <ng-container *ngIf="!selectFolder.choice && selectFolder.folders[selectFolder.index]">
+      <page-buttons [directory]="selectFolder.folders[selectFolder.index].folder.dir"
+        [gridLayout]="selectFolder.gridLayout"
+        [actions]="selectFolder.folders[selectFolder.index].folder.manifest.Controllers[0].Actions"
+      ></page-buttons>
+      <div class="text-center text-xxs opacity-60">{{selectFolder.index + 1}} of {{selectFolder.folders.length}}</div>
+      <div class="flex child-margin-xxs">
+        <button type="button"
+          (click)="selectFolder.index = selectFolder.index === 0 ? selectFolder.folders.length - 1 : selectFolder.index-1"
+        >⬅️ BACK</button>
+        
+        <button type="button" class="flex-1"
+          (click)="selectFolder.choice = selectFolder.folders[selectFolder.index]"
+        >SELECT CHILD ABOVE</button>
+  
+        <button type="button" (click)="selectFolder.index = selectFolder.index === selectFolder.folders.length - 1 ? 0 : selectFolder.index+1"
+        >➡️ NEXT</button>
+      </div>
+    </ng-container>
+    <div class="text-center pad">
+      <a class="text-xxs opacity-60"
+        (click)="viewAll=!viewAll;reload()"
+      >{{ viewAll ? '📂 view unlinked' : '📂 view all' }}</a>
+    </div>
+
+    <ng-container *ngIf="selectFolder.choice">
+      <page-buttons [directory]="selectFolder.choice.folder.dir"
+        [gridLayout]="selectFolder.gridLayout"
+        [actions]="selectFolder.choice.folder.manifest.Controllers[0].Actions"
+      ></page-buttons>
+
+      <p>We can save this association using one or more entries into the child folder back button</p>
+
+      <div title="Sets a return identifier in that target folder back button (com.elgato.streamdeck.profile.backtoparent) as Settings.ProfileUUID = parent.UUID">
+        <input type="checkbox" id="saveIntoSettings" [(ngModel)]="selectFolder.saveIntoSettings" />
+        <label for="saveIntoSettings">
+          &nbsp;Save into Action.Settings
+        </label>
+      </div>
+
+      <div>
+        <input type="checkbox" id="saveIntoTitle" [(ngModel)]="selectFolder.saveIntoTitle" />
+        <label for="saveIntoTitle">
+          &nbsp;Save into Action.Title
+        </label>
+      </div>
+
+      <br />
+      <div class="flex child-margin-xxs">
+        <button type="button" class="flex-1"
+          (click)="saveChildAssociation()"
+        >💾 SAVE</button>
+      </div>
+    </ng-container>
+  </div>
+</div>
