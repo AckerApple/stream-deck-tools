@@ -28,10 +28,14 @@ export interface NotInActions {
   manifest: ProfileFolderManifest // manifest missing control.action
 
   actions: Actions
-  inProfileDir: DirectoryManager // the directory we are coming FROM so we can grab images
+  fromProfileDir: DirectoryManager // the directory we are coming FROM so we can grab images
+  withProfileDir: DirectoryManager // the directory we need to paste things into
   
   // missing in profile parent details
-  profileParent: ProfileManifestRead
+  fromProfile: ProfileManifestRead
+
+
+  viewFromJson: Record<string, boolean>
 }
 
 export interface NotInActionsCompare extends Compare {

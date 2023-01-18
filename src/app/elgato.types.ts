@@ -27,6 +27,10 @@ export interface ProfileAction {
     ProfileUUID: string
     DeviceUUID: string
     PageIndex: number
+
+    // browser settings examples
+    openInBrowser?: boolean
+    path?: string // "http://localhost:3030/"
   }
   States: State[]
   Actions?: ProfileAction[]

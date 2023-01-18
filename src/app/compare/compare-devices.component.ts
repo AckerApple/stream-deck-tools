@@ -7,6 +7,12 @@ import { getProfileHomeDirByDir, ProfileFolderManifestRead, ProfileManifestRead,
 import { NotInActionsCompare, NotInProfileCompare } from './compare-types';
 import { deleteProfileAction, DeviceView, getChildByAction, getDeviceView } from './navigate-devices.component';
 
+const noCompareSettings = [
+  'com.elgato.streamdeck.profile.openchild',
+  'com.elgato.streamdeck.profile.backtoparent',
+  'com.elgato.streamdeck.profile.rotate',
+]
+
 @Component({
   templateUrl: './compare-devices.component.html',
 })
@@ -68,7 +74,8 @@ export class CompareDevicesComponent {
   }
 
   setDeviceWith(uuid: string) {
-    this.deviceWith = this.devices.find(x => x.UUID === uuid)
+    const devices = this.showOtherStreamDeck ? this.otherDevices : this.devices
+    this.deviceWith = devices.find(x => x.UUID === uuid)
   }
 
   async compare() {
@@ -78,6 +85,7 @@ export class CompareDevicesComponent {
     }
 
     this.notFoundProfiles.length = 0
+    this.notFoundActions.length = 0
 
     ++this.session.loading
     this.fromProfiles = await this.session.streamdeck.getProfileFoldersByDeviceId(this.deviceFrom.UUID)
@@ -85,36 +93,42 @@ export class CompareDevicesComponent {
     const otherDeck = this.showOtherStreamDeck ? this.otherStreamDeck : this.session.streamdeck
     this.withProfiles = await otherDeck.getProfileFoldersByDeviceId(this.deviceWith.UUID)
 
-    this.notFoundProfiles = this.findMissingProfiles(this.fromProfiles, this.withProfiles)
-    this.notFoundActions = await this.findMissingActions(this.fromProfiles, this.withProfiles)
+    this.session.info('scanning for missing profiles')
+    await this.findMissingProfiles(this.fromProfiles, this.withProfiles, this.notFoundProfiles)
+    this.session.info('scanning for missing actions')
+    await this.findMissingActions(this.fromProfiles, this.withProfiles, this.notFoundActions)
     --this.session.loading
     this.compared = true
   }
 
   findMissingProfiles(
     fromProfiles: ProfileManifestRead[],
-    withProfiles: ProfileManifestRead[]
+    withProfiles: ProfileManifestRead[],
+    results: NotInProfileCompare[] = [],
   ): NotInProfileCompare[] {
     const noMatchesFrom = this.findMissingProfilesByMode(fromProfiles, withProfiles, 'not-in-with')
     const noMatchesWith = this.findMissingProfilesByMode(withProfiles, fromProfiles, 'not-in-from')
-    noMatchesFrom.push(...noMatchesWith)
-    return noMatchesFrom
+    results.push(...noMatchesFrom)
+    results.push(...noMatchesWith)
+    return results
   }
 
   async findMissingActions(
     fromProfiles: ProfileManifestRead[],
-    withProfiles: ProfileManifestRead[]
+    withProfiles: ProfileManifestRead[],
+    results: NotInActionsCompare[] = [],
   ): Promise<NotInActionsCompare[]> {
-    const noMatchesFrom = await this.findMissingActionsByMode(fromProfiles, withProfiles, 'not-in-with')
-    const noMatchesWith = await this.findMissingActionsByMode(withProfiles, fromProfiles, 'not-in-from')
-    noMatchesFrom.push(...noMatchesWith)
-    return noMatchesFrom
+    await this.findMissingActionsByMode(fromProfiles, withProfiles, 'not-in-with', results)
+    // Currently, we only scan in one direction
+    // await this.findMissingActionsByMode(withProfiles, fromProfiles, 'not-in-from', results)
+    return results
   }
 
   async findMissingActionsByMode(
     fromProfiles: ProfileManifestRead[],
     withProfiles: ProfileManifestRead[],
-    compareType: 'not-in-from' | 'not-in-with'
+    compareType: 'not-in-from' | 'not-in-with',
+    results: NotInActionsCompare[] = [],
   ): Promise<NotInActionsCompare[]> {
     const promises = fromProfiles.map(async fromProfile => {
       const withProfile = findProfileNameMatch(fromProfile, withProfiles)
@@ -123,32 +137,34 @@ export class CompareDevicesComponent {
         return // its not even a found profile, skip
       }
 
-      const fromProfileHomeDir = await getProfileHomeDirByDir(fromProfile.manifestFile.directory, fromProfile)
-      const foundProfileHomeDir = await getProfileHomeDirByDir(withProfile.manifestFile.directory, withProfile)
+      const [fromProfileHomeDir, withProfileHomeDir] = await Promise.all([
+        getProfileHomeDirByDir(fromProfile.manifestFile.directory, fromProfile),
+        getProfileHomeDirByDir(withProfile.manifestFile.directory, withProfile),
+      ])
 
-      if ( !fromProfileHomeDir || !foundProfileHomeDir ) {
-        console.warn('cannot find home page for fromProfileHomeDir and/or foundProfileHomeDir')
+      if ( !fromProfileHomeDir ) {
+        console.warn('cannot find home page for fromProfileHomeDir')
         return
       }
 
-      const results = await compareProfileFolders(
+      if ( !withProfileHomeDir ) {
+        console.warn('cannot find home page for withProfileHomeDir')
+        return
+      }
+
+      const compared = await compareProfileFolders(
         fromProfileHomeDir,
-        foundProfileHomeDir,
-        // fromProfile, // aka profileParent
+        withProfileHomeDir,
         compareType,
-        { fromProfile, withProfile }
+        { fromProfile, withProfile },
+        results
       )
       
-      return results
+      return compared
     })
 
-    const results = await Promise.all(promises)
-    const validResults = results.filter(x => x) as NotInActionsCompare[][]
-    const flatResults = validResults.reduce((all, inner) => {
-      all.push(...inner)
-      return all
-    }, [] as NotInActionsCompare[])
-    return flatResults
+    await Promise.all(promises)
+    return results
   }
 
   findMissingProfilesByMode(
@@ -199,17 +215,17 @@ export class CompareDevicesComponent {
     const imagePathSplit = imagePath.split('/')
     const imageFolder = imagePathSplit[0]
     const imageFileName = imagePathSplit[1]
-    const imgDir = await compare.notInActions.inProfileDir.getDirectory(imageFolder)
+    const imgDir = await compare.notInActions.fromProfileDir.getDirectory(imageFolder)
     const file = await imgDir.file(imageFileName)
     const base64 = await file.readAsDataURL()
     const blob = dataURItoBlob(base64)
-    
+    // write copied image
     const notInFile = compare.notInActions.notInFile
     const writeDir = await notInFile.directory.getDirectory(imageFolder)
     const writeFile = await writeDir.file(imageFileName, { create: true })
     await writeFile.write(blob as any)
     
-    this.session.info(`Successfully saved ${notInFile.name}`)
+    this.session.info(`Successfully saved ${notInFile.directory.path}/${notInFile.name}`)
   }
 
   async showSubFolderSelect(
@@ -335,13 +351,14 @@ async function compareProfileFolders(
     fromProfile: ProfileManifestRead
     withProfile: ProfileManifestRead
   },
+  results: NotInActionsCompare[] = [],
 ): Promise<NotInActionsCompare[]> {
-  const results: NotInActionsCompare[] = []
   const fromActions = fromFolder.manifest.Controllers[0].Actions
   const withActions = withFolder.manifest.Controllers[0].Actions
 
   const promises = Object.entries(fromActions).map(async ([key, action]) => {
-    const withAction = withActions[key]
+    const withAction: ProfileAction = withActions[key]
+
     if ( withAction ) {
       const kidResults = await compareProfileActionForKids(
         action,
@@ -352,11 +369,40 @@ async function compareProfileFolders(
         {withProfile, fromProfile},
       )
       results.push(...kidResults)
-      return // the action was found, skip it
+
+      const isMisaligned = Object.entries(action.Settings).find(([name, value]) => {
+        if ( noCompareSettings.includes(action.UUID) ) {
+          return false // we can't compare settings for this kind
+        }
+
+        if ( !['string','number','boolean'].includes(typeof(value)) ) {
+          return false // we only compare simple values
+        }
+
+        const compareValue = (withAction.Settings as any)[name]
+        if ( compareValue !== value ) {
+          return true // a simple value is not the same on both sides
+        }
+
+        return false // its the right value
+      })
+
+      if ( isMisaligned ) {
+        return {
+          key, // the button position
+          action,
+        }
+      }
+
+      return false // the action was found, skip it
     }
 
-    return { key, action }
+    return {
+      key, // the button position
+      action,
+    }
   })
+  
   const missingActions = (await Promise.all(promises)).filter(x => x) as {key:string, action:ProfileAction}[]
 
   const result: NotInActionsCompare = {
@@ -371,15 +417,18 @@ async function compareProfileFolders(
         return all
       }, {} as Actions),
       
-      inProfileDir: fromFolder.dir, // the directory we are coming FROM so we can grab images
+      fromProfileDir: fromFolder.dir, // the directory we are coming FROM so we can grab images
+      withProfileDir: withFolder.dir, // the directory we need to paste things into
       
       // missing in profile parent details
-      profileParent: fromProfile, 
+      fromProfile, 
+
+      // ui elements
+      viewFromJson: {}
     }
   }
 
   if ( Object.keys(result.notInActions.actions).length ) {
-    console.log('bad action push')
     results.push(result)
   }
 

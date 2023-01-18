@@ -20,7 +20,7 @@
       <select (change)="setDeviceFrom($any($event.target).value)" class="width-full">
         <option value=""></option>
         <ng-container *ngFor="let item of devices">
-          <ng-container *ngIf="deviceWith?.UUID != item.UUID">
+          <ng-container *ngIf="showOtherStreamDeck || deviceWith?.UUID != item.UUID">
             <option [value]="item.UUID">{{item.Model}} - {{item.UUID}}</option>
           </ng-container>
         </ng-container>
@@ -46,7 +46,7 @@
       </select>
     </div>
 
-    <div *ngIf="deviceFrom && deviceWith && deviceFrom.UUID != deviceWith.UUID" class="flex1">
+    <div *ngIf="deviceFrom && deviceWith" class="flex1">
       <div>&nbsp;</div>
       <button type="button" class="width-full "
         (click)="compare()"
@@ -74,15 +74,17 @@
   <!-- missing actions -->
   <div class="pad-v" *ngIf="notFoundActions.length; else allActionFound">
     <!-- code find hint: profiles not found. profile not found-->
-    <h3>{{ notFoundActions.length }} Action{{ notFoundActions.length > 1 ? 's' : ''}} not found</h3>
-    <div class="flex-wrap">
+    <h3>{{ notFoundActions.length }} Action{{ notFoundActions.length > 1 ? 's' : ''}} out of sync</h3>
+    <div class="flex-wrap gap">
       <ng-container *ngFor="let item of notFoundActions">
-        <div *ngFor="let ak of item.notInActions.actions | keyvalue" class="flex-stacked flex-center">
-          <page-button [action]="ak.value" [directory]="item.notInActions.inProfileDir"></page-button>
+        <div *ngFor="let ak of item.notInActions.actions | keyvalue"
+          class="flex-stacked flex-center bg-grey pad-xs flex1"
+        >
+          <page-button [action]="ak.value" [directory]="item.notInActions.fromProfileDir"></page-button>
           <div>
             <div>
-              {{ item.notInActions.profileParent.manifest.Name }} - {{ ak.value.Name }}
-              <!--{{ ak.value.UUID }}-->
+              {{ item.notInActions.fromProfile.manifest.Name }} - {{ ak.value.Name }}
+              <div class="text-xs">{{ ak.value.UUID }}</div>
             </div>
             <div class="text-center text-xxs">
               <div class="flex-stacked">
@@ -91,8 +93,19 @@
               </div>
               <div>{{item.compareType}}</div>
             </div>
-            <div *ngIf="ak.value.UUID !== 'com.elgato.streamdeck.profile.openchild' && ak.value.Name !== 'Create Folder'; else cannotFix">
-              <button class="bg-calm" (click)="fixNotFoundAction(ak.key, ak.value, item)">🔧 fix</button>                  
+            <div *ngIf="ak.value.UUID !== 'com.elgato.streamdeck.profile.openchild' && ak.value.Name !== 'Create Folder'; else cannotFix"
+              class="flex-wrap"
+            >
+              <button class="bg-calm flex1"
+                (click)="fixNotFoundAction(ak.key, ak.value, item)"
+              >🔧 fix</button>
+              <button class="flex1"
+                [ngClass] = "item.notInActions.viewFromJson[ak.key] ? 'bg-energized' : 'bg-calm'"
+                (click)="item.notInActions.viewFromJson[ak.key] = !item.notInActions.viewFromJson[ak.key]"
+              >view from json</button>
+            </div>
+            <div *ngIf="item.notInActions.viewFromJson[ak.key]">
+              <textarea readonly class="width-full min-height-400" wrap="off">{{ ak.value | json }}</textarea>
             </div>
             <ng-template #cannotFix>
               <div class="text-danger">cannot fix missing folders. Use StreamDeck app to copy/paste missing item</div>

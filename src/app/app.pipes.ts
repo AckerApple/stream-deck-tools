@@ -16,12 +16,14 @@ import { SessionProvider } from './session.provider'
     async function run() {
       ++session.loading
       const image = await dir.findFileByPath(imagePath)
-  
+      --session.loading
+      
       if ( !image ) {
         return
       }
-  
-
+      
+      
+      ++session.loading
       subject.next(await image.readAsDataURL())
       --session.loading
     }
